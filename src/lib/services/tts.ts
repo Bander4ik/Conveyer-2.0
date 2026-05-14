@@ -4,11 +4,6 @@ import { getSetting } from "../settings";
 import { log } from "../logger";
 import type { Scene } from "./scene-split";
 import {
-  createTtsJob as labs69CreateTts,
-  pollJob as labs69PollJob,
-  downloadJob as labs69DownloadJob,
-} from "./labs69";
-import {
   createSpeechJob as geminigenCreateSpeech,
   pollJob as geminigenPollJob,
   extractResultUrl as geminigenExtractResultUrl,
@@ -23,7 +18,8 @@ export interface TtsResult {
 }
 
 /**
- * Synthesizes one scene. Supports 69labs (default), ElevenLabs (direct), OpenAI TTS.
+ * Synthesizes one scene. Default provider: geminigen (Gemini TTS).
+ * Fallbacks: ElevenLabs (direct), OpenAI TTS. 69labs was removed in v2.
  * Each file is sceneN.mp3 in the scene directory.
  */
 export async function synthesizeScene(
@@ -42,14 +38,12 @@ export async function synthesizeScene(
 
   if (provider === "geminigen") {
     await geminigenTts(runId, scene.text, filePath);
-  } else if (provider === "69labs") {
-    await labs69Tts(runId, scene.text, filePath);
   } else if (provider === "elevenlabs") {
     await elevenLabs(scene.text, filePath);
   } else if (provider === "openai") {
     await openaiTts(scene.text, filePath);
   } else {
-    throw new Error(`Unknown TTS provider: ${provider}`);
+    throw new Error(`Unknown TTS provider: ${provider}. Supported: geminigen, elevenlabs, openai.`);
   }
 
   const stats = fs.statSync(filePath);
@@ -100,64 +94,6 @@ async function geminigenTts(runId: string, text: string, outPath: string) {
   const item = await geminigenPollJob("speech", job.uuid, runId, "tts");
   const url = geminigenExtractResultUrl("speech", item);
   await geminigenDownload(url, outPath);
-}
-
-async function labs69Tts(runId: string, text: string, outPath: string) {
-  const voiceId = getSetting("TTS_VOICE_ID") || "en-US-GuyNeural";
-  const voiceProviderRaw = (getSetting("TTS_VOICE_PROVIDER") || "edgetts").toLowerCase();
-  const voiceProvider =
-    voiceProviderRaw === "elevenlabs" || voiceProviderRaw === "edgetts" || voiceProviderRaw === "voice-clone"
-      ? (voiceProviderRaw as "elevenlabs" | "edgetts" | "voice-clone")
-      : "edgetts";
-  const modelId = getSetting("TTS_MODEL") || undefined;
-  const splitTypeRaw = (getSetting("TTS_SPLIT_TYPE") || "smart").toLowerCase();
-  const splitType =
-    splitTypeRaw === "paragraphs" || splitTypeRaw === "max_length"
-      ? (splitTypeRaw as "smart" | "paragraphs" | "max_length")
-      : "smart";
-
-  // ElevenLabs-specific fine-tuning
-  const voiceSettings: {
-    stability?: number;
-    similarityBoost?: number;
-    speed?: number;
-    style?: number;
-    useSpeakerBoost?: boolean;
-  } = {};
-  if (voiceProvider === "elevenlabs") {
-    const stability = parseFloatOr(getSetting("TTS_STABILITY"), NaN);
-    const similarity = parseFloatOr(getSetting("TTS_SIMILARITY_BOOST"), NaN);
-    const speed = parseFloatOr(getSetting("TTS_SPEED"), NaN);
-    const style = parseFloatOr(getSetting("TTS_STYLE"), NaN);
-    const speakerBoost = getSetting("TTS_USE_SPEAKER_BOOST");
-
-    if (!Number.isNaN(stability)) voiceSettings.stability = clamp(stability, 0, 1);
-    if (!Number.isNaN(similarity)) voiceSettings.similarityBoost = clamp(similarity, 0, 1);
-    if (!Number.isNaN(speed)) voiceSettings.speed = clamp(speed, 0.7, 1.2);
-    if (!Number.isNaN(style)) voiceSettings.style = clamp(style, 0, 1);
-    if (speakerBoost === "1") voiceSettings.useSpeakerBoost = true;
-    else if (speakerBoost === "0") voiceSettings.useSpeakerBoost = false;
-  }
-
-  // Auto-pause — stops TTS from rushing through sentence ends
-  const autoPauseEnabled = getSetting("TTS_AUTO_PAUSE") === "1";
-  const autoPauseDuration = parseFloatOr(getSetting("TTS_PAUSE_DURATION"), NaN);
-  const autoPauseFrequency = parseFloatOr(getSetting("TTS_PAUSE_FREQUENCY"), NaN);
-
-  const jobId = await labs69CreateTts({
-    text,
-    voiceId,
-    voiceProvider,
-    modelId,
-    splitType,
-    voiceSettings,
-    autoPauseEnabled,
-    autoPauseDuration: !Number.isNaN(autoPauseDuration) ? clamp(autoPauseDuration, 0.1, 30) : undefined,
-    autoPauseFrequency: !Number.isNaN(autoPauseFrequency) ? clamp(autoPauseFrequency, 1, 100) : undefined,
-  });
-  log(runId, "debug", `69labs TTS job ${jobId.slice(0, 8)}… (${voiceProvider}/${voiceId}, speed=${voiceSettings.speed ?? "default"}, pause=${autoPauseEnabled ? `${autoPauseDuration}s` : "off"})`, { stage: "tts" });
-  await labs69PollJob("tts", jobId, runId, "tts");
-  await labs69DownloadJob("tts", jobId, outPath);
 }
 
 function parseFloatOr(s: string, fallback: number): number {

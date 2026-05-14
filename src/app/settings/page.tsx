@@ -42,17 +42,6 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Optional / Fallback Providers",
-    subtitle: "Only needed if you want alternative TTS or image providers. The default pipeline uses GeminiGen.AI for everything.",
-    fields: [
-      {
-        key: "LABS69_API_KEY",
-        desc: "Optional — 69labs.vip gateway for ElevenLabs voices. Use this only if you prefer an ElevenLabs voice over Gemini TTS and want to switch TTS_PROVIDER to `69labs` below.",
-        examples: "Sign up at https://69labs.vip → Account → API keys. Starts with vk_",
-      },
-    ],
-  },
-  {
     title: "Storage Location",
     subtitle: "Where the generated audio, images, and final videos are saved on disk.",
     fields: [
@@ -90,8 +79,8 @@ const GROUPS: Group[] = [
     fields: [
       {
         key: "TTS_PROVIDER",
-        desc: "Top-level routing of TTS jobs. `geminigen` (default) uses Gemini TTS through your GEMINIGEN_API_KEY. `69labs` routes through 69labs's ElevenLabs gateway (needs LABS69_API_KEY). `elevenlabs` calls ElevenLabs directly. `openai` uses gpt-4o-mini-tts.",
-        examples: "geminigen (default)  /  69labs  /  elevenlabs  /  openai",
+        desc: "Top-level routing of TTS jobs. `geminigen` (default) uses Gemini TTS through your GEMINIGEN_API_KEY. `elevenlabs` calls ElevenLabs directly with ELEVENLABS_API_KEY. `openai` uses gpt-4o-mini-tts with OPENAI_API_KEY.",
+        examples: "geminigen (default)  /  elevenlabs  /  openai",
       },
       {
         key: "TTS_VOICE_ID",
@@ -124,66 +113,9 @@ const GROUPS: Group[] = [
         examples: "calm documentary narrator  ·  energetic news anchor  ·  bedtime story whisper",
       },
       {
-        key: "TTS_VOICE_PROVIDER",
-        desc: "69labs ONLY — which voice family inside 69labs. ElevenLabs = best quality. Edge TTS = free Microsoft voices. Voice-clone = celebrity clones. Ignored when TTS_PROVIDER is geminigen/elevenlabs/openai.",
-        examples: "elevenlabs  /  edgetts  /  voice-clone",
-      },
-      {
-        key: "TTS_SPLIT_TYPE",
-        desc: "69labs ONLY — how the service chunks text internally. `smart` splits at sentence boundaries (best for narration). Ignored by GeminiGen.",
-        examples: "smart  /  paragraphs  /  max_length",
-      },
-    ],
-  },
-  {
-    title: "Voice Fine-Tuning (ElevenLabs voices)",
-    subtitle: "Subtle voice character controls. Active when TTS_VOICE_PROVIDER = elevenlabs — works whether you reach ElevenLabs directly or through 69labs's gateway. Ignored for edgetts and voice-clone. Defaults are tuned for slower, documentary-style narration.",
-    fields: [
-      {
         key: "TTS_SPEED",
-        desc: "Speech rate. 1.0 = neutral pace. Lower values slow the voice down. 0.93 default sounds slightly more cinematic and gives the listener more time to absorb each sentence.",
-        examples: "Range 0.7–1.2  ·  default 0.93",
-      },
-      {
-        key: "TTS_STABILITY",
-        desc: "How consistent the voice sounds across the whole audio. Higher = more uniform, less variation. Lower = more expressive but can sometimes wobble.",
-        examples: "Range 0–1  ·  default 0.6 (balanced for narration)",
-      },
-      {
-        key: "TTS_SIMILARITY_BOOST",
-        desc: "How closely the synthesized voice matches the source reference. Higher = more faithful to the original voice's character.",
-        examples: "Range 0–1  ·  default 0.75",
-      },
-      {
-        key: "TTS_STYLE",
-        desc: "Expressiveness. 0 = calm, even delivery. Higher values inject more emotional inflection. Documentary voices usually sit around 0.1–0.2.",
-        examples: "Range 0–1  ·  default 0.15",
-      },
-      {
-        key: "TTS_USE_SPEAKER_BOOST",
-        desc: "Strengthens the unique character of the speaker. Useful when you notice the voice drifting toward a generic sound. Leave at `1` unless the output sounds harsh.",
-        examples: "1 = enabled  ·  0 = disabled  ·  empty = provider default",
-      },
-    ],
-  },
-  {
-    title: "Sentence Pauses (ElevenLabs voices)",
-    subtitle: "Inserts automatic breath pauses BETWEEN sentences within a single scene's TTS. Active for ElevenLabs voices — works through 69labs's gateway too. Note: pauses between SCENES are handled separately via SCENE_TAIL_SILENCE in Video Assembly below.",
-    fields: [
-      {
-        key: "TTS_AUTO_PAUSE",
-        desc: "Turns automatic pauses on. When off, ElevenLabs may rush through periods. Recommended on for any narration longer than 30 seconds.",
-        examples: "1 = enabled  ·  empty = disabled",
-      },
-      {
-        key: "TTS_PAUSE_DURATION",
-        desc: "How long each pause is. Documentaries usually sit around 0.3–0.5s. Audiobooks can go up to 0.8s for a more reflective tempo.",
-        examples: "Range 0.1–30 seconds  ·  default 0.4",
-      },
-      {
-        key: "TTS_PAUSE_FREQUENCY",
-        desc: "How often the pause is inserted. 1 = every sentence boundary. Higher numbers add the pause less often (e.g. 5 = every 5th boundary).",
-        examples: "Range 1–100  ·  default 1",
+        desc: "Speech rate. 1.0 = neutral pace. For GeminiGen TTS the range is 0.25–4.0. For ElevenLabs it's clamped to 0.7–1.2 internally. Lower = slower, more cinematic narration.",
+        examples: "Range 0.25–4.0 (geminigen)  ·  default 1.0  ·  0.85 for slow documentary",
       },
     ],
   },
@@ -193,8 +125,8 @@ const GROUPS: Group[] = [
     fields: [
       {
         key: "IMAGE_PROVIDER",
-        desc: "Which service generates images. GeminiGen.AI is the default — direct access to Google's Gemini Image models with no per-account rate limit on nano-banana-2.",
-        examples: "geminigen  /  69labs  /  replicate  /  openai  /  fal",
+        desc: "Which service generates images. GeminiGen.AI is the default — direct access to Google's Gemini Image models with no per-account rate limit on nano-banana-2. Fallbacks: Replicate (Flux), OpenAI Images, fal.ai.",
+        examples: "geminigen (default)  /  replicate  /  openai  /  fal",
       },
       {
         key: "IMAGE_MODEL",
@@ -225,12 +157,12 @@ const GROUPS: Group[] = [
   },
   {
     title: "Animations (img2vid)",
-    subtitle: "Turns selected images into short video clips with real motion. Optional — leave provider on `off` to keep everything as static Ken-Burns photos.",
+    subtitle: "Turns each generated image into a Veo video clip. In v2 EVERY scene is animated by default — no static Ken-Burns photos. Set ANIMATION_PROVIDER to `off` to fall back to Ken-Burns photos (much cheaper, no video credits used).",
     fields: [
       {
         key: "ANIMATION_PROVIDER",
-        desc: "Service for img2vid. `off` skips animation entirely. `geminigen` (default when on) uses Google Veo directly with no rate limit. `69labs`, `replicate`, `fal` are alternative providers.",
-        examples: "off  /  geminigen  /  69labs  /  replicate  /  fal",
+        desc: "Service for img2vid. `geminigen` (default) uses Google Veo through GeminiGen.AI — no rate limit. `replicate` uses Kling/WAN, `fal` uses Kling. `off` disables animation entirely and falls back to Ken-Burns photo zoom (cheapest option).",
+        examples: "geminigen (default, every scene animated)  /  replicate  /  fal  /  off (photos only)",
       },
       {
         key: "ANIMATION_MODEL",
@@ -244,13 +176,13 @@ const GROUPS: Group[] = [
       },
       {
         key: "ANIMATION_RATIO_PERCENT",
-        desc: "Percentage of scenes to animate. 100 = every scene is a video clip. 50 = half. 0 = none (Ken-Burns only).",
-        examples: "0–100  ·  default 50",
+        desc: "Percentage of scenes to animate. 100 (default in v2) = every scene is a Veo video clip. Lower it (e.g. 50) to mix Veo clips with Ken-Burns photos and save credits.",
+        examples: "100 (default, every scene animated)  ·  50 (mix)  ·  0 (photos only)",
       },
       {
         key: "ANIMATION_DISTRIBUTION",
-        desc: "Which scenes get picked when ratio < 100. `first-half` puts video clips at the start (strong hook), photos at the end. `alternating` interleaves them. `random` picks scenes with motion keywords first.",
-        examples: "first-half  /  alternating  /  random  /  all",
+        desc: "Which scenes get picked when ratio < 100. `all` (default) = every scene. `first-half` puts video clips at the start (strong hook), photos at the end. `alternating` interleaves. `random` picks scenes with motion keywords first.",
+        examples: "all (default)  /  first-half  /  alternating  /  random",
       },
       {
         key: "ANIMATION_DURATION",
@@ -290,14 +222,14 @@ const GROUPS: Group[] = [
       },
       {
         key: "SCENE_TAIL_SILENCE",
-        desc: "Silence appended to the END of every scene's audio before assembly. This is the ONLY way to get pauses BETWEEN scenes — ElevenLabs's TTS_AUTO_PAUSE only handles pauses INSIDE one TTS call (intra-scene), and since each scene is a separate TTS call, scene boundaries get no breath without this setting. Raise to 0.6–0.8 if the narration still feels rushed at sentence endings.",
+        desc: "Silence appended to the END of every scene's audio before assembly. This is how you get natural breathing room BETWEEN scenes — each scene is a separate TTS call, so without this setting scenes get stitched back-to-back with no pause. Raise to 0.6–0.8 if the narration still feels rushed at sentence endings.",
         examples: "0 = no padding (back-to-back)  ·  0.4 = natural breath (default)  ·  0.8 = reflective pacing",
       },
     ],
   },
   {
     title: "Performance (Concurrency)",
-    subtitle: "How many parallel API jobs and FFmpeg renders to run at once. Higher = faster but risks rate limits. Defaults are tuned for 69labs's limits.",
+    subtitle: "How many parallel API jobs and FFmpeg renders to run at once. Higher = faster, but rate-limited models (nano-banana-pro free tier ~5/min) need caution.",
     fields: [
       {
         key: "IMAGE_CONCURRENCY",
@@ -306,8 +238,8 @@ const GROUPS: Group[] = [
       },
       {
         key: "TTS_CONCURRENCY",
-        desc: "Simultaneous TTS jobs through 69labs/ElevenLabs. ElevenLabs has generous limits, so higher = faster narration generation for long scripts.",
-        examples: "default 3  ·  bump to 5–7 if you have an unlimited ElevenLabs subscription",
+        desc: "Simultaneous TTS jobs through GeminiGen Gemini TTS. No documented rate limit on tts-flash — raise as high as your network/CPU allows.",
+        examples: "default 3  ·  bump to 5–7 for long scripts (no API-side cap)",
       },
       {
         key: "ANIMATION_CONCURRENCY",
@@ -328,16 +260,16 @@ const GROUPS: Group[] = [
   },
   {
     title: "Optional / Alternative Providers",
-    subtitle: "You only need these if you want to bypass 69labs and call providers directly. Leave empty if you're using the default 69labs stack.",
+    subtitle: "Backup providers. Leave empty if you're using the default GeminiGen.AI stack — these are only needed if you want ElevenLabs voices, Replicate/fal alternatives, or Claude for scene splitting.",
     fields: [
       {
         key: "ELEVENLABS_API_KEY",
-        desc: "Direct ElevenLabs API key. Only used when TTS_PROVIDER is set to `elevenlabs` (not `69labs`).",
+        desc: "Direct ElevenLabs API key. Only used when TTS_PROVIDER is set to `elevenlabs`. Useful if you have a specific ElevenLabs voice you prefer over Gemini TTS.",
         examples: "Sign up at https://elevenlabs.io → Profile → API Keys",
       },
       {
         key: "REPLICATE_API_TOKEN",
-        desc: "Replicate token, for using Flux Schnell or Kling models directly without 69labs. Useful if you want pay-as-you-go pricing.",
+        desc: "Replicate token, for using Flux Schnell (images) or Kling/WAN (img2vid) as alternatives to GeminiGen. Pay-as-you-go pricing.",
         examples: "Sign up at https://replicate.com → Account → API Tokens",
       },
       {

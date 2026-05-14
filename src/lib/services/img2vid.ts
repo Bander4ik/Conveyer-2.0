@@ -4,7 +4,6 @@ import { getSetting } from "../settings";
 import { getPrompt } from "../prompts";
 import { log } from "../logger";
 import type { Scene } from "./scene-split";
-import { createVideoJob as labs69CreateVideo, pollJob as labs69PollJob, downloadJob as labs69DownloadJob, cancelJob as labs69CancelJob } from "./labs69";
 import {
   createVideoJob as ggCreateVideo,
   pollJob as ggPollJob,
@@ -13,21 +12,22 @@ import {
 } from "./geminigen";
 
 /**
- * Turns a still image into a short ~5-second video clip.
- * Default provider: geminigen.ai (Veo 3.1 Fast). Also supports 69labs (Veo),
- * Replicate Kling/WAN, and fal.ai.
+ * Turns a still image into a short video clip.
+ * Default provider: geminigen.ai (Veo 3.1). Fallbacks: Replicate Kling/WAN,
+ * fal.ai.
  *
- * Returns a path to the .mp4. If the provider is disabled, returns null
- * — the assembly step then falls back to Ken-Burns on the still image.
+ * Returns a path to the .mp4. If the provider is "off", returns null —
+ * the assembly step then falls back to Ken-Burns on the still image.
+ * 69labs was removed in v2.
  */
 export async function animateScene(
   runId: string,
   scene: Scene,
   imagePath: string,
   outDir: string,
-  options: { providerJobId?: string; imageProvider?: string } = {}
+  _options: { providerJobId?: string; imageProvider?: string } = {}
 ): Promise<string | null> {
-  const provider = (getSetting("ANIMATION_PROVIDER") || "off").toLowerCase();
+  const provider = (getSetting("ANIMATION_PROVIDER") || "geminigen").toLowerCase();
   if (provider === "off") return null;
 
   const fileName = `scene_${String(scene.index).padStart(3, "0")}.mp4`;
@@ -40,14 +40,12 @@ export async function animateScene(
 
   if (provider === "geminigen") {
     await geminigenImg2Vid(runId, scene, imagePath, filePath);
-  } else if (provider === "69labs") {
-    await labs69Img2Vid(runId, scene, options.providerJobId, options.imageProvider, filePath);
   } else if (provider === "replicate") {
     await replicateImg2Vid(scene, imagePath, filePath);
   } else if (provider === "fal") {
     await falImg2Vid(scene, imagePath, filePath);
   } else {
-    throw new Error(`Unknown animation provider: ${provider}`);
+    throw new Error(`Unknown animation provider: ${provider}. Supported: off, geminigen, replicate, fal.`);
   }
 
   log(runId, "success", `Animation done: ${fileName}`, { stage: "animate" });
@@ -103,77 +101,6 @@ async function geminigenImg2Vid(
       if (attempt < MAX_ATTEMPTS) {
         const delay = 5000 * attempt;
         log(runId, "warn", `geminigen video attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg.slice(0, 200)} — retry in ${delay}ms`, {
-          stage: "animate",
-        });
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-}
-
-async function labs69Img2Vid(
-  runId: string,
-  scene: Scene,
-  providerJobId: string | undefined,
-  imageProvider: string | undefined,
-  outPath: string
-) {
-  const model = getSetting("ANIMATION_MODEL") || undefined;
-  const aspectRatio = getSetting("IMAGE_RATIO") || undefined;
-  const durationSetting = getSetting("ANIMATION_DURATION") || undefined;
-  // ANIMATION_KEEP_VEO_AUDIO=1 — keep Veo's generated audio (default: off, mute it).
-  const keepAudio = getSetting("ANIMATION_KEEP_VEO_AUDIO") === "1";
-
-  // Live-photo style: per-scene visual prompt + global motion-style suffix.
-  const motionStyle = getPrompt("animation_motion");
-  const prompt = `${scene.visual_prompt}. ${motionStyle}`;
-
-  // If the image was generated through 69labs, pass its jobId so the API
-  // reuses the cached image instead of making us re-upload bytes.
-  const usableJobId = imageProvider === "69labs" ? providerJobId : undefined;
-
-  // Veo 3.1 Fast does NOT support custom duration. Only pass it for other models.
-  const supportsDuration = model && !/^veo/i.test(model);
-  const duration = supportsDuration && durationSetting ? durationSetting : undefined;
-
-  // Retry: timeout → cancel → retry. Same pattern as image-gen.
-  const MAX_ATTEMPTS = 3;
-  let lastErr: unknown;
-  let lastJobId: string | null = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const jobId = await labs69CreateVideo({
-        prompt,
-        model,
-        aspectRatio,
-        duration,
-        imageJobId: usableJobId,
-        mute: !keepAudio,
-      });
-      lastJobId = jobId;
-      log(
-        runId,
-        "debug",
-        `69labs video job ${jobId.slice(0, 8)}… (img2vid${usableJobId ? ", reusing image" : ", text-only"}, attempt=${attempt})`,
-        { stage: "animate" }
-      );
-      await labs69PollJob("videos", jobId, runId, "animate");
-      await labs69DownloadJob("videos", jobId, outPath);
-      return;
-    } catch (e) {
-      lastErr = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      if (lastJobId && /polling timeout/i.test(msg)) {
-        const cancelled = await labs69CancelJob("videos", lastJobId);
-        log(runId, "debug", `Cancelled video ${lastJobId.slice(0, 8)} → ${cancelled ? "ok" : "skipped"}`, {
-          stage: "animate",
-        });
-      }
-      if (attempt < MAX_ATTEMPTS) {
-        const delay = 5000 * attempt;
-        log(runId, "warn", `video attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg.slice(0, 200)} — retry in ${delay}ms`, {
           stage: "animate",
         });
         await new Promise((r) => setTimeout(r, delay));

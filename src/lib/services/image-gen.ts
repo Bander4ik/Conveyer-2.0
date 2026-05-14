@@ -4,7 +4,6 @@ import { getSetting } from "../settings";
 import { getPrompt } from "../prompts";
 import { log } from "../logger";
 import type { Scene } from "./scene-split";
-import { createImageJob as labs69CreateImage, pollJob as labs69PollJob, downloadJob as labs69DownloadJob, cancelJob as labs69CancelJob } from "./labs69";
 import {
   createImageJob as ggCreateImage,
   pollJob as ggPollJob,
@@ -23,8 +22,11 @@ export interface ImageResult {
 
 /**
  * Generates one illustration for a scene.
- * Default provider: geminigen.ai (nano-banana-2, no rate limit). Also supports
- * 69labs, Replicate (Flux), OpenAI Images, fal.ai.
+ * Default provider: geminigen.ai (nano-banana-pro for max quality).
+ * Fallback providers: Replicate (Flux), OpenAI Images, fal.ai.
+ *
+ * 69labs was removed in v2 — GeminiGen.AI covers all our needs with no
+ * rate limit on its core models.
  */
 export async function generateImage(
   runId: string,
@@ -47,11 +49,6 @@ export async function generateImage(
     log(runId, "success", `Image saved: ${fileName}`, { stage: "image" });
     return { filePath, providerJobId: uuid, provider };
   }
-  if (provider === "69labs") {
-    const jobId = await labs69Image(runId, finalPrompt, filePath);
-    log(runId, "success", `Image saved: ${fileName}`, { stage: "image" });
-    return { filePath, providerJobId: jobId, provider };
-  }
   if (provider === "replicate") {
     await replicateImage(finalPrompt, filePath);
   } else if (provider === "openai") {
@@ -59,71 +56,10 @@ export async function generateImage(
   } else if (provider === "fal") {
     await falImage(finalPrompt, filePath);
   } else {
-    throw new Error(`Unknown image provider: ${provider}`);
+    throw new Error(`Unknown image provider: ${provider}. Supported: geminigen, replicate, openai, fal.`);
   }
   log(runId, "success", `Image saved: ${fileName}`, { stage: "image" });
   return { filePath, provider };
-}
-
-async function labs69Image(runId: string, prompt: string, outPath: string): Promise<string> {
-  const model = getSetting("IMAGE_MODEL") || undefined; // server default = imagen-4
-  let aspectRatio = getSetting("IMAGE_RATIO") || undefined;
-
-  // Imagen 4 only accepts 'square|portrait|landscape', not numeric ratios like '16:9'.
-  // Safely map for the Imagen family.
-  const isImagen = !model || /^imagen/i.test(model);
-  if (isImagen && aspectRatio) {
-    const map: Record<string, string> = {
-      "16:9": "landscape", "21:9": "landscape", "4:3": "landscape", "3:2": "landscape",
-      "1:1": "square",
-      "9:16": "portrait", "9:21": "portrait", "3:4": "portrait", "2:3": "portrait",
-    };
-    aspectRatio = map[aspectRatio] ?? aspectRatio;
-  }
-
-  const resolution = getSetting("IMAGE_RESOLUTION") || undefined;
-
-  // Retry: on timeout we cancel the stuck job first to free the concurrent slot.
-  const MAX_ATTEMPTS = 3;
-  let lastErr: unknown;
-  let lastJobId: string | null = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const jobId = await labs69CreateImage({ prompt, model, aspectRatio, resolution });
-      lastJobId = jobId;
-      log(
-        runId,
-        "debug",
-        `69labs image job ${jobId.slice(0, 8)}… (model=${model ?? "default"}, aspect=${aspectRatio}, res=${resolution ?? "default"}, attempt=${attempt})`,
-        { stage: "image" }
-      );
-      await labs69PollJob("images", jobId, runId, "image");
-      await labs69DownloadJob("images", jobId, outPath);
-      return jobId;
-    } catch (e) {
-      lastErr = e;
-      const msg = e instanceof Error ? e.message : String(e);
-
-      // On polling timeout — cancel the orphaned job to free its concurrency slot
-      if (lastJobId && /polling timeout/i.test(msg)) {
-        const cancelled = await labs69CancelJob("images", lastJobId);
-        log(runId, "debug", `Cancelled ${lastJobId.slice(0, 8)} → ${cancelled ? "ok" : "skipped"}`, {
-          stage: "image",
-        });
-      }
-
-      if (attempt < MAX_ATTEMPTS) {
-        // Exponential backoff to let slots thaw
-        const delay = 5000 * attempt;
-        log(runId, "warn", `image attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg.slice(0, 200)} — retry in ${delay}ms`, {
-          stage: "image",
-        });
-        await new Promise((r) => setTimeout(r, delay));
-      }
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /**
