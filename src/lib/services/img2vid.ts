@@ -23,7 +23,7 @@ import {
 export async function animateScene(
   runId: string,
   scene: Scene,
-  imagePath: string,
+  imagePath: string | null,
   outDir: string,
   _options: { providerJobId?: string; imageProvider?: string } = {}
 ): Promise<string | null> {
@@ -32,17 +32,20 @@ export async function animateScene(
 
   const fileName = `scene_${String(scene.index).padStart(3, "0")}.mp4`;
   const filePath = path.join(outDir, fileName);
+  const mode = imagePath ? "img2vid" : "text-to-video";
 
-  log(runId, "info", `img2vid scene #${scene.index} (${provider})`, {
+  log(runId, "info", `${mode} scene #${scene.index} (${provider})`, {
     stage: "animate",
-    data: { provider, prompt: scene.visual_prompt.slice(0, 120) },
+    data: { provider, mode, prompt: scene.visual_prompt.slice(0, 120) },
   });
 
   if (provider === "geminigen") {
     await geminigenImg2Vid(runId, scene, imagePath, filePath);
   } else if (provider === "replicate") {
+    if (!imagePath) throw new Error("Replicate Kling requires an image keyframe — set IMAGE_PROVIDER != off");
     await replicateImg2Vid(scene, imagePath, filePath);
   } else if (provider === "fal") {
+    if (!imagePath) throw new Error("fal.ai Kling requires an image keyframe — set IMAGE_PROVIDER != off");
     await falImg2Vid(scene, imagePath, filePath);
   } else {
     throw new Error(`Unknown animation provider: ${provider}. Supported: off, geminigen, replicate, fal.`);
@@ -53,13 +56,18 @@ export async function animateScene(
 }
 
 /**
- * GeminiGen.AI Veo img2vid. The image file is uploaded as ref_images via
- * multipart. Veo runs in "frame" mode by default — image becomes first frame.
+ * GeminiGen.AI Veo. Two modes:
+ *   - imagePath provided → img2vid ("frame" mode, image is first keyframe)
+ *   - imagePath null     → pure text-to-video (Veo synthesizes from prompt)
+ *
+ * In v2 the default pipeline runs text-to-video (no image stage), trading the
+ * tight keyframe control of img2vid for one fewer API call per scene plus
+ * dodging nano-banana-pro's rate limits.
  */
 async function geminigenImg2Vid(
   runId: string,
   scene: Scene,
-  imagePath: string,
+  imagePath: string | null,
   outPath: string
 ) {
   const model = getSetting("ANIMATION_MODEL") || "veo-3.1-fast";
@@ -82,8 +90,10 @@ async function geminigenImg2Vid(
         resolution,
         duration,
         aspectRatio,
-        modeImage: "frame",
-        refImagePaths: [imagePath],
+        // Only attach the image when we actually have one.
+        ...(imagePath
+          ? { modeImage: "frame" as const, refImagePaths: [imagePath] }
+          : {}),
       });
       log(
         runId,

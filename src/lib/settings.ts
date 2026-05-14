@@ -139,11 +139,11 @@ export const DEFAULTS: Record<SettingKey, string> = {
   TTS_STYLE: "0.15",
   TTS_SPEED: "1.0",
 
-  // Images — GeminiGen.AI Gemini 3 Pro Image (nano-banana-pro) for maximum
-  // quality. nano-banana-pro is "professional asset creation, advanced
-  // reasoning, high-fidelity text" per the docs. Free tier has a 5/min rate
-  // limit so we lower IMAGE_CONCURRENCY accordingly.
-  IMAGE_PROVIDER: "geminigen",
+  // Images — OFF by default in v2. Veo runs text-to-video so the image stage
+  // is unnecessary AND the rate-limited nano-banana-pro was the slowest /
+  // most-failing step. To re-enable img2vid keyframes, set IMAGE_PROVIDER to
+  // geminigen (or replicate / openai / fal) — pipeline auto-detects.
+  IMAGE_PROVIDER: "off",
   IMAGE_MODEL: "nano-banana-pro",
   IMAGE_RATIO: "16:9",
   IMAGE_RESOLUTION: "2K",
@@ -169,11 +169,12 @@ export const DEFAULTS: Record<SettingKey, string> = {
   SCENE_TAIL_SILENCE: "0.4",
 
   // Performance
-  //  - IMAGE_CONCURRENCY: 3 keeps us under nano-banana-pro's 5/min free-tier
-  //    cap. Switch to nano-banana-2 (no limit) and raise to 15+ for high
-  //    throughput.
-  //  - ANIMATION_CONCURRENCY: 2 because veo-3.1 (full) is the slowest model
-  //    and each clip costs more credits. Bump to 4–6 with veo-3.1-fast.
+  //  - IMAGE_CONCURRENCY: unused while IMAGE_PROVIDER=off; 3 is safe for
+  //    nano-banana-pro (5/min free-tier rate limit) if you re-enable images.
+  //  - TTS_CONCURRENCY: algrow.online limits to 30 requests/min. With ~5-10s
+  //    per request, 3 parallel jobs comfortably stays under that ceiling.
+  //  - ANIMATION_CONCURRENCY: 2 because veo-3.1 (full) is slow and each clip
+  //    costs credits. Bump to 4–6 if you switch to veo-3.1-fast.
   IMAGE_CONCURRENCY: "3",
   TTS_CONCURRENCY: "3",
   ANIMATION_CONCURRENCY: "2",
@@ -240,6 +241,40 @@ function migrateLegacyValues() {
     ];
     runMigration(stage2);
     upsertStmt.run("_migration_v2_algrow_tts", "1");
+  }
+
+  // Stage 3: drop image stage by default + clamp concurrency for algrow.
+  // Reasoning:
+  //   - nano-banana-pro is rate-limited (5/min free) and was the single biggest
+  //     source of 500s in pipeline runs. Veo can text-to-video without it.
+  //   - algrow.online limits TTS to 30 req/min. 3 parallel jobs is safe.
+  const flag3 = getStmt.get("_migration_v2_no_images") as { value: string } | undefined;
+  if (flag3?.value !== "1") {
+    const stage3: Array<[string, (current: string) => string | null]> = [
+      ["IMAGE_PROVIDER", (v) => (v === "geminigen" ? "off" : null)],
+      ["TTS_CONCURRENCY", (v) => {
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) && n > 3 ? "3" : null;
+      }],
+      ["IMAGE_CONCURRENCY", (v) => {
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) && n > 3 ? "3" : null;
+      }],
+    ];
+    runMigration(stage3);
+    // Force-overwrite the scene_split prompt so users on the old short-scene
+    // prompt switch to the new ≥220-char version. Only touches the default —
+    // a user with a custom prompt that already covers the rule still keeps it.
+    try {
+      const promptRow = db
+        .prepare("SELECT content FROM prompts WHERE name = ?")
+        .get("scene_split") as { content: string } | undefined;
+      if (promptRow && /1, 2, or sometimes 3 COMPLETE sentences/.test(promptRow.content)) {
+        // It's the OLD default. Reset it.
+        db.prepare("DELETE FROM prompts WHERE name = ?").run("scene_split");
+      }
+    } catch {}
+    upsertStmt.run("_migration_v2_no_images", "1");
   }
 }
 

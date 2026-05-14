@@ -62,6 +62,19 @@ export async function runPipeline(runId: string, script: string) {
       { stage: "pipeline" }
     );
 
+    // v2 pipeline shape:
+    //   - When IMAGE_PROVIDER is "off" (default in v2), we SKIP image generation
+    //     entirely. Veo runs in text-to-video mode using just the scene's
+    //     visual_prompt. The image keyframe path was useful for img2vid control
+    //     but cost an extra API call and a rate-limited provider per scene —
+    //     not worth it for documentary content where Veo's prompt
+    //     interpretation is plenty.
+    //   - When IMAGE_PROVIDER is set (geminigen/replicate/openai/fal), we keep
+    //     the old img2vid flow: image first, then animate using it as keyframe.
+    //     Ken-Burns photo fallback path also still works for that mode.
+    const imageProviderSetting = (getSetting("IMAGE_PROVIDER") || "off").toLowerCase();
+    const skipImages = imageProviderSetting === "off";
+
     type SceneResult = (AssembleInput & {
       _imgProviderJobId?: string;
       _imgProvider?: string;
@@ -70,26 +83,36 @@ export async function runPipeline(runId: string, script: string) {
     const settled: SceneResult[] = await Promise.all(
       scenes.map(async (scene): Promise<SceneResult> => {
         try {
-          // Cancellation check before starting new scene tasks.
-          // Already-running tasks complete naturally.
           checkCancelled(runId);
-          const [audio, image] = await Promise.all([
-            limitTts(() => synthesizeScene(runId, scene, audioDir)),
-            limitImg(() => generateImage(runId, scene, imgDir)),
-          ]);
 
-          // 2b. If this scene is in the animation target set, start the img2vid
-          //     job RIGHT NOW — no need to wait for other scenes' images.
+          // TTS always runs. Image only runs if not skipped.
+          const audioPromise = limitTts(() => synthesizeScene(runId, scene, audioDir));
+          const imagePromise = skipImages
+            ? Promise.resolve(null)
+            : limitImg(() => generateImage(runId, scene, imgDir));
+          const [audio, image] = await Promise.all([audioPromise, imagePromise]);
+
+          // Animate this scene. Text-to-video if no image, img2vid if there is one.
           let videoPath: string | null = null;
           if (animTargets.has(scene.index)) {
             try {
               videoPath = await limitAnim(() =>
-                animateScene(runId, scene, image.filePath, animDir, {
-                  providerJobId: image.providerJobId,
-                  imageProvider: image.provider,
-                })
+                animateScene(
+                  runId,
+                  scene,
+                  image?.filePath ?? null,
+                  animDir,
+                  {
+                    providerJobId: image?.providerJobId,
+                    imageProvider: image?.provider,
+                  }
+                )
               );
             } catch (e) {
+              if (skipImages) {
+                // No fallback path — re-throw to fail the scene.
+                throw e;
+              }
               log(
                 runId,
                 "warn",
@@ -99,13 +122,18 @@ export async function runPipeline(runId: string, script: string) {
             }
           }
 
+          // In skip-images mode the scene MUST have a video (no image fallback).
+          if (skipImages && !videoPath) {
+            throw new Error(`Scene #${scene.index} produced no video (Veo failed and no image fallback exists in skip-images mode)`);
+          }
+
           return {
             scene,
-            imagePath: image.filePath,
+            imagePath: image?.filePath ?? videoPath!,  // assembly uses videoPath if image is null
             videoPath,
             audio,
-            _imgProviderJobId: image.providerJobId,
-            _imgProvider: image.provider,
+            _imgProviderJobId: image?.providerJobId,
+            _imgProvider: image?.provider,
           };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
