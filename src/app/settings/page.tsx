@@ -305,10 +305,20 @@ export default function SettingsPage() {
   useEffect(() => { load(false); }, []);
 
   async function save() {
+    // Drop fields whose value is still the masked placeholder ("AIza…XXXX").
+    // Sending those back overwrites the real key in the DB with a broken
+    // string containing U+2026 — which then crashes every downstream API
+    // call (fetch refuses to put non-ASCII chars in headers).
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(values)) {
+      const isSecret = k.includes("KEY") || k.includes("TOKEN");
+      if (isSecret && typeof v === "string" && v.includes("…")) continue;
+      cleaned[k] = v;
+    }
     const r = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(values),
+      body: JSON.stringify(cleaned),
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({} as { error?: string }));

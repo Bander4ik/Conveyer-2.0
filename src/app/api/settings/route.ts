@@ -32,7 +32,23 @@ export async function POST(req: Request) {
 
   for (const [k, v] of Object.entries(body)) {
     if (!allowed.has(k)) continue;
-    setSetting(k as SettingKey, String(v ?? ""));
+    const next = String(v ?? "");
+
+    // Defense against the "save masked secrets" trap:
+    // GET returns secret values as "AIza…XXXX" (truncated with U+2026). If the
+    // user opens /settings (where they see masked values), doesn't touch the
+    // field, and clicks "Save all", the form would POST those masked strings
+    // BACK to us — overwriting the real key in the DB with a broken value.
+    // The corrupted key then breaks every API call ("Cannot convert argument
+    // to a ByteString because the character at index N has a value of 8230").
+    //
+    // Skip the write whenever a secret-looking field arrives containing U+2026.
+    const isSecretField = k.includes("KEY") || k.includes("TOKEN");
+    if (isSecretField && next.includes("…")) {
+      continue; // keep existing DB value untouched
+    }
+
+    setSetting(k as SettingKey, next);
   }
   return NextResponse.json({ ok: true });
 }
