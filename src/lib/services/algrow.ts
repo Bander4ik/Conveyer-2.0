@@ -26,6 +26,31 @@ const POLL_INTERVAL_MS = 2500;
 // TTS is fast but long scripts can queue; 5 min is plenty.
 const POLL_MAX_MS = 5 * 60 * 1000;
 
+// Algrow's documented rate cap is 30 requests/min (sliding window). pLimit
+// caps concurrency but not throughput, so 3 parallel jobs that each take
+// ~3 s still issue ~60/min — over the limit. We add an explicit sliding
+// window that paces submissions to ≤ MAX_PER_WINDOW per WINDOW_MS.
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_PER_WINDOW = 28; // leave a small headroom below the 30 cap
+const recentRequests: number[] = [];
+
+async function rateLimitWait(): Promise<void> {
+  while (true) {
+    const now = Date.now();
+    // Drop timestamps older than the window
+    while (recentRequests.length && now - recentRequests[0] > RATE_WINDOW_MS) {
+      recentRequests.shift();
+    }
+    if (recentRequests.length < RATE_MAX_PER_WINDOW) {
+      recentRequests.push(now);
+      return;
+    }
+    // Sleep just past the oldest request's window expiry
+    const sleepMs = RATE_WINDOW_MS - (now - recentRequests[0]) + 50;
+    await sleep(sleepMs);
+  }
+}
+
 function apiKey(): string {
   const k = getSetting("ALGROW_API_KEY");
   if (!k) {
@@ -34,6 +59,18 @@ function apiKey(): string {
     );
   }
   return k;
+}
+
+/**
+ * Parses Algrow's 429 body for the "Try again in Ns" hint. Returns ms to wait
+ * or null if the body doesn't say.
+ *   Example body: `{"error":"Rate limit exceeded (30 requests/min). Try again in 1s.","success":false}`
+ */
+function parse429Retry(body: string): number | null {
+  const m = /Try again in (\d+)s/i.exec(body);
+  if (!m) return null;
+  const sec = parseInt(m[1], 10);
+  return Number.isFinite(sec) ? Math.max(sec * 1000, 1000) : null;
 }
 
 // ── Voice catalog ──────────────────────────────────────────────────────────
@@ -130,34 +167,59 @@ export interface TtsSubmitResult {
   jobId: string;
 }
 
-/** POST /api/generate-simple. Returns the queued job's id. */
+/** POST /api/generate-simple. Returns the queued job's id.
+ *  Internally rate-limited to stay under Algrow's 30/min sliding cap, with
+ *  exponential 429 retries that honor the "Try again in Ns" hint when present.
+ */
 export async function createTtsJob(opts: TtsJobOpts): Promise<TtsSubmitResult> {
-  const form = new FormData();
-  form.append("script", opts.script);
-  form.append("voice_id", opts.voiceId);
-  if (opts.provider) form.append("provider", opts.provider);
-  if (opts.voiceName) form.append("voice_name", opts.voiceName);
-  if (opts.customTitle) form.append("custom_title", opts.customTitle);
-  if (opts.modelId) form.append("model_id", opts.modelId);
-  if (opts.stability !== undefined) form.append("stability", String(opts.stability));
-  if (opts.similarityBoost !== undefined) form.append("similarity_boost", String(opts.similarityBoost));
-  if (opts.style !== undefined) form.append("style", String(opts.style));
-  if (opts.speed !== undefined) form.append("speed", String(opts.speed));
-  if (opts.generateSrt !== undefined) form.append("generate_srt", String(opts.generateSrt));
+  // FormData has to be rebuilt per attempt — a consumed stream can't be reused.
+  const buildForm = () => {
+    const form = new FormData();
+    form.append("script", opts.script);
+    form.append("voice_id", opts.voiceId);
+    if (opts.provider) form.append("provider", opts.provider);
+    if (opts.voiceName) form.append("voice_name", opts.voiceName);
+    if (opts.customTitle) form.append("custom_title", opts.customTitle);
+    if (opts.modelId) form.append("model_id", opts.modelId);
+    if (opts.stability !== undefined) form.append("stability", String(opts.stability));
+    if (opts.similarityBoost !== undefined) form.append("similarity_boost", String(opts.similarityBoost));
+    if (opts.style !== undefined) form.append("style", String(opts.style));
+    if (opts.speed !== undefined) form.append("speed", String(opts.speed));
+    if (opts.generateSrt !== undefined) form.append("generate_srt", String(opts.generateSrt));
+    return form;
+  };
 
-  const r = await fetch(`${BASE}/api/generate-simple`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey()}` },
-    body: form,
-  });
-  if (!r.ok) {
-    throw new Error(`Algrow TTS submit ${r.status}: ${(await r.text()).slice(0, 400)}`);
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    await rateLimitWait();
+    const r = await fetch(`${BASE}/api/generate-simple`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey()}` },
+      body: buildForm(),
+    });
+
+    if (r.ok) {
+      const json = (await r.json()) as { success?: boolean; job_id?: string; status?: string; message?: string };
+      if (!json.job_id) {
+        throw new Error(`Algrow TTS submit: no job_id (${JSON.stringify(json).slice(0, 200)})`);
+      }
+      return { jobId: json.job_id };
+    }
+
+    const body = (await r.text()).slice(0, 400);
+
+    // 429 is recoverable — wait per server's hint (or exponential backoff)
+    // and retry. Don't count it as a real failure unless we exhaust retries.
+    if (r.status === 429 && attempt < MAX_ATTEMPTS) {
+      const hinted = parse429Retry(body);
+      const waitMs = hinted ?? Math.min(2000 * 2 ** (attempt - 1), 30_000);
+      await sleep(waitMs);
+      continue;
+    }
+
+    throw new Error(`Algrow TTS submit ${r.status}: ${body}`);
   }
-  const json = (await r.json()) as { success?: boolean; job_id?: string; status?: string; message?: string };
-  if (!json.job_id) {
-    throw new Error(`Algrow TTS submit: no job_id (${JSON.stringify(json).slice(0, 200)})`);
-  }
-  return { jobId: json.job_id };
+  throw new Error("Algrow TTS submit: exhausted retries (rate-limited)");
 }
 
 // ── Polling + download ─────────────────────────────────────────────────────

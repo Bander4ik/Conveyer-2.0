@@ -262,19 +262,24 @@ function migrateLegacyValues() {
       }],
     ];
     runMigration(stage3);
-    // Force-overwrite the scene_split prompt so users on the old short-scene
-    // prompt switch to the new ≥220-char version. Only touches the default —
-    // a user with a custom prompt that already covers the rule still keeps it.
-    try {
-      const promptRow = db
-        .prepare("SELECT content FROM prompts WHERE name = ?")
-        .get("scene_split") as { content: string } | undefined;
-      if (promptRow && /1, 2, or sometimes 3 COMPLETE sentences/.test(promptRow.content)) {
-        // It's the OLD default. Reset it.
-        db.prepare("DELETE FROM prompts WHERE name = ?").run("scene_split");
-      }
-    } catch {}
     upsertStmt.run("_migration_v2_no_images", "1");
+  }
+
+  // Stage 4: force-reset the scene_split prompt to the v2 long-scene template.
+  // Why this is a separate stage / always wipes:
+  //   The v2 algrow.online TTS provider requires ≥ 220 chars per request.
+  //   Any cached scene_split prompt that targets 20-word scenes (whether the
+  //   old default OR a user customization) will produce sub-220-char scenes
+  //   that fail. So we unconditionally delete the prompt row here — the
+  //   default-seeder then re-inserts the new template. If the user
+  //   intentionally customized it for v2, they can re-edit it once after this
+  //   migration runs; we won't touch it again because the flag stops re-runs.
+  const flag4 = getStmt.get("_migration_v2_long_scenes") as { value: string } | undefined;
+  if (flag4?.value !== "1") {
+    try {
+      db.prepare("DELETE FROM prompts WHERE name = ?").run("scene_split");
+    } catch {}
+    upsertStmt.run("_migration_v2_long_scenes", "1");
   }
 }
 
