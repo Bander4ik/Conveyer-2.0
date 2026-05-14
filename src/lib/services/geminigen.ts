@@ -83,6 +83,62 @@ export async function createImageJob(opts: {
   return { uuid: json.uuid };
 }
 
+// ── Speech generation (Text-to-Speech via Gemini TTS) ──────────────────────
+
+export interface SpeechGenJob {
+  uuid: string;
+}
+
+/**
+ * POST /uapi/v1/text-to-speech
+ *
+ * Returns the job uuid which you then poll with pollJob("speech", ...).
+ * Voice IDs come from the user's GeminiGen account dashboard
+ * (https://geminigen.ai/app/speech-gen → Gemini Voices tab).
+ */
+export async function createSpeechJob(opts: {
+  input: string;
+  model?: string;            // "tts-flash" (Gemini 2.5 Flash, default)
+  voiceId: string;           // e.g. "Kore", "Puck" — copy from dashboard
+  voiceName: string;         // display name — usually same as id
+  speed?: number;            // 0.25 – 4.0, default 1.0
+  outputFormat?: "mp3" | "wav"; // default "mp3"
+  emotion?: string;          // e.g. "Casual", "Excited", "Firm"
+  customPrompt?: string;     // free-form style instruction
+}): Promise<SpeechGenJob> {
+  const body: Record<string, unknown> = {
+    input: opts.input,
+    model: opts.model ?? "tts-flash",
+    output_format: opts.outputFormat ?? "mp3",
+    speed: opts.speed ?? 1.0,
+    voices: [
+      {
+        voice: { id: opts.voiceId, name: opts.voiceName },
+        name: opts.voiceName,
+      },
+    ],
+  };
+  if (opts.emotion) body.emotion = opts.emotion;
+  if (opts.customPrompt) body.custom_prompt = opts.customPrompt;
+
+  const resp = await fetch(`${BASE}/text-to-speech`, {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey(),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(`GeminiGen TTS ${resp.status}: ${(await resp.text()).slice(0, 400)}`);
+  }
+  const json = (await resp.json()) as { uuid?: string; id?: number; detail?: { uuid?: string } };
+  const uuid = json.uuid ?? json.detail?.uuid;
+  if (!uuid) throw new Error(`GeminiGen TTS: response missing uuid (${JSON.stringify(json).slice(0, 200)})`);
+  return { uuid };
+}
+
 // ── Video generation (img2vid via Veo) ──────────────────────────────────────
 
 export interface VideoGenJob {
@@ -164,6 +220,10 @@ interface HistoryItem {
   generated_video?: Array<{
     video_url?: string | null;
   }>;
+  generated_audio?: Array<{
+    audio_url?: string | null;
+    file_download_url?: string | null;
+  }>;
   generate_result?: string | null;
 }
 
@@ -179,7 +239,7 @@ async function fetchHistory(uuid: string): Promise<HistoryItem> {
 
 /** Polls a job until status=2 (completed) or status=3 (failed). */
 export async function pollJob(
-  kind: "image" | "video",
+  kind: "image" | "video" | "speech",
   uuid: string,
   runId: string,
   stage: string,
@@ -208,11 +268,16 @@ export async function pollJob(
 }
 
 /** Extracts the result media URL from a completed history item. */
-export function extractResultUrl(kind: "image" | "video", item: HistoryItem): string {
+export function extractResultUrl(kind: "image" | "video" | "speech", item: HistoryItem): string {
   if (kind === "image") {
     const img = item.generated_image?.[0];
     const url = img?.file_download_url || img?.image_url || item.generate_result;
     if (!url) throw new Error(`GeminiGen image: no result URL in history (${JSON.stringify(item).slice(0, 300)})`);
+    return url;
+  } else if (kind === "speech") {
+    const aud = item.generated_audio?.[0];
+    const url = aud?.file_download_url || aud?.audio_url || item.generate_result;
+    if (!url) throw new Error(`GeminiGen speech: no result URL in history (${JSON.stringify(item).slice(0, 300)})`);
     return url;
   } else {
     const vid = item.generated_video?.[0];

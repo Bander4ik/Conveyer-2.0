@@ -3,7 +3,17 @@ import path from "node:path";
 import { getSetting } from "../settings";
 import { log } from "../logger";
 import type { Scene } from "./scene-split";
-import { createTtsJob, pollJob, downloadJob } from "./labs69";
+import {
+  createTtsJob as labs69CreateTts,
+  pollJob as labs69PollJob,
+  downloadJob as labs69DownloadJob,
+} from "./labs69";
+import {
+  createSpeechJob as geminigenCreateSpeech,
+  pollJob as geminigenPollJob,
+  extractResultUrl as geminigenExtractResultUrl,
+  downloadToFile as geminigenDownload,
+} from "./geminigen";
 
 export interface TtsResult {
   /** Path to the mp3 file. */
@@ -21,7 +31,7 @@ export async function synthesizeScene(
   scene: Scene,
   outDir: string
 ): Promise<TtsResult> {
-  const provider = (getSetting("TTS_PROVIDER") || "69labs").toLowerCase();
+  const provider = (getSetting("TTS_PROVIDER") || "geminigen").toLowerCase();
   const fileName = `scene_${String(scene.index).padStart(3, "0")}.mp3`;
   const filePath = path.join(outDir, fileName);
 
@@ -30,7 +40,9 @@ export async function synthesizeScene(
     data: { provider, text: scene.text.slice(0, 80) },
   });
 
-  if (provider === "69labs") {
+  if (provider === "geminigen") {
+    await geminigenTts(runId, scene.text, filePath);
+  } else if (provider === "69labs") {
     await labs69Tts(runId, scene.text, filePath);
   } else if (provider === "elevenlabs") {
     await elevenLabs(scene.text, filePath);
@@ -49,6 +61,45 @@ export async function synthesizeScene(
     stage: "tts",
   });
   return { filePath, durationSec };
+}
+
+async function geminigenTts(runId: string, text: string, outPath: string) {
+  const voiceId = getSetting("TTS_VOICE_ID");
+  const voiceName = getSetting("TTS_VOICE_NAME") || voiceId;
+  if (!voiceId || !voiceName) {
+    throw new Error(
+      "GeminiGen TTS requires TTS_VOICE_ID and TTS_VOICE_NAME (set them in /settings — pick a voice at https://geminigen.ai/app/speech-gen and copy its id + name)"
+    );
+  }
+
+  const model = getSetting("TTS_MODEL") || "tts-flash";
+  const outputFormatRaw = (getSetting("TTS_OUTPUT_FORMAT") || "mp3").toLowerCase();
+  const outputFormat = outputFormatRaw === "wav" ? "wav" : "mp3";
+  const speedRaw = parseFloatOr(getSetting("TTS_SPEED"), 1.0);
+  const speed = clamp(speedRaw, 0.25, 4.0);
+  const emotion = getSetting("TTS_EMOTION") || undefined;
+  const customPrompt = getSetting("TTS_CUSTOM_PROMPT") || undefined;
+
+  const job = await geminigenCreateSpeech({
+    input: text,
+    model,
+    voiceId,
+    voiceName,
+    speed,
+    outputFormat,
+    emotion,
+    customPrompt,
+  });
+  log(
+    runId,
+    "debug",
+    `GeminiGen TTS job ${job.uuid.slice(0, 8)}… (${voiceName}, speed=${speed}, ${outputFormat})`,
+    { stage: "tts" }
+  );
+
+  const item = await geminigenPollJob("speech", job.uuid, runId, "tts");
+  const url = geminigenExtractResultUrl("speech", item);
+  await geminigenDownload(url, outPath);
 }
 
 async function labs69Tts(runId: string, text: string, outPath: string) {
@@ -93,7 +144,7 @@ async function labs69Tts(runId: string, text: string, outPath: string) {
   const autoPauseDuration = parseFloatOr(getSetting("TTS_PAUSE_DURATION"), NaN);
   const autoPauseFrequency = parseFloatOr(getSetting("TTS_PAUSE_FREQUENCY"), NaN);
 
-  const jobId = await createTtsJob({
+  const jobId = await labs69CreateTts({
     text,
     voiceId,
     voiceProvider,
@@ -105,8 +156,8 @@ async function labs69Tts(runId: string, text: string, outPath: string) {
     autoPauseFrequency: !Number.isNaN(autoPauseFrequency) ? clamp(autoPauseFrequency, 1, 100) : undefined,
   });
   log(runId, "debug", `69labs TTS job ${jobId.slice(0, 8)}… (${voiceProvider}/${voiceId}, speed=${voiceSettings.speed ?? "default"}, pause=${autoPauseEnabled ? `${autoPauseDuration}s` : "off"})`, { stage: "tts" });
-  await pollJob("tts", jobId, runId, "tts");
-  await downloadJob("tts", jobId, outPath);
+  await labs69PollJob("tts", jobId, runId, "tts");
+  await labs69DownloadJob("tts", jobId, outPath);
 }
 
 function parseFloatOr(s: string, fallback: number): number {

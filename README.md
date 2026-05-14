@@ -5,11 +5,12 @@ like [The Sky Lab](https://www.youtube.com/@TheSkyLab-u4j) and
 [Interstellar Dreams](https://www.youtube.com/@InterstellarDreams-w5g):
 **script → scenes → voiceover + visuals → final MP4**.
 
-> 🚀 **What changed in v2.0:** images and Veo img2vid now go through
-> [GeminiGen.AI](https://geminigen.ai) instead of 69labs. GeminiGen's `nano-banana-2`
-> image model and Veo endpoints have NO per-account concurrency limits, so the
-> generation phase scales as far as your CPU and credit budget allow — without
-> needing multi-key tricks. ElevenLabs voice narration still goes through 69labs.
+> 🚀 **What changed in v2.0:** the entire generation phase (images, Veo img2vid AND
+> TTS) now goes through [GeminiGen.AI](https://geminigen.ai). A single key powers
+> `nano-banana-2` images, Veo video and Gemini TTS — all with NO per-account
+> concurrency limits, so the generation phase scales as far as your CPU and credit
+> budget allow. 69labs is now optional (only if you prefer an ElevenLabs voice over
+> Gemini TTS's 400+ Gemini voices).
 
 > 👋 **Brand new and don't know what npm / Node / API keys are?**
 > Read [SETUP.md](./SETUP.md) — a non-technical step-by-step install guide that walks you
@@ -61,17 +62,21 @@ Then open http://localhost:3000.
 > normally. If you see "Operation not permitted", run `chmod +x *.command` in Terminal first.
 
 ### Required keys
-Open `/settings`. The top section, **Required API Keys**, shows the three keys you must
+Open `/settings`. The top section, **Required API Keys**, shows the two keys you must
 provide before anything works:
 
 1. **`GOOGLE_API_KEY`** — Google AI Studio (Gemini) for scene splitting. Free tier is
    plenty. Get one at https://aistudio.google.com/app/apikey
-2. **`GEMINIGEN_API_KEY`** — GeminiGen.AI for images + Veo img2vid. No per-account rate
-   limits on `nano-banana-2` or Veo. Sign up at https://geminigen.ai
-3. **`LABS69_API_KEY`** — 69labs.vip for ElevenLabs voice narration only. Sign up at
-   https://69labs.vip
+2. **`GEMINIGEN_API_KEY`** — GeminiGen.AI for images (nano-banana-2), Veo img2vid AND
+   TTS (Gemini TTS). One key for the entire generation phase, no per-account rate
+   limits on the core models. Sign up at https://geminigen.ai
 
-That's it. All other settings have sensible defaults.
+You also need to pick a TTS voice once:
+- Open https://geminigen.ai/app/speech-gen → **Gemini Voices** tab → click any voice
+- Copy its ID and name into `TTS_VOICE_ID` and `TTS_VOICE_NAME` at `/settings`
+
+That's it. Optional: paste `LABS69_API_KEY` only if you'd rather use an ElevenLabs
+voice instead of Gemini TTS, then switch `TTS_PROVIDER` to `69labs`.
 
 ---
 
@@ -85,7 +90,7 @@ script
   │  each scene: { text, visual_prompt, duration_hint_sec }
   ▼
 [2] for each scene, in parallel (with concurrency limits):
-       ├─ TTS (ElevenLabs via 69labs) → mp3
+       ├─ TTS (GeminiGen.AI Gemini TTS, or 69labs ElevenLabs as fallback) → mp3
        ├─ image (GeminiGen.AI nano-banana-2 / nano-banana-pro / imagen-4) → png
        └─ img2vid (GeminiGen.AI Veo 3.1 Fast) → mp4 (only for scenes selected by ratio + distribution)
   │
@@ -125,7 +130,8 @@ Most behavior lives in these files:
 | Area | File |
 |---|---|
 | Scene splitter (Gemini / Claude) | `src/lib/services/scene-split.ts` |
-| TTS providers (69labs / ElevenLabs / OpenAI) | `src/lib/services/tts.ts` |
+| TTS providers (GeminiGen / 69labs / ElevenLabs / OpenAI) | `src/lib/services/tts.ts` |
+| GeminiGen.AI client (images, video, TTS) | `src/lib/services/geminigen.ts` |
 | Image providers (69labs / Replicate / OpenAI / fal) | `src/lib/services/image-gen.ts` |
 | img2vid providers (Veo via 69labs / Kling via Replicate) | `src/lib/services/img2vid.ts` |
 | FFmpeg assembly (Ken-Burns, xfade) | `src/lib/services/video-assemble.ts` |

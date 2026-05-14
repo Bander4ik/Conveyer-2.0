@@ -7,10 +7,10 @@ import db from "./db";
 export const SETTING_KEYS = [
   // ── Required API keys ─────────────────────────────────────────────
   "GOOGLE_API_KEY",          // Gemini — scene splitting
-  "GEMINIGEN_API_KEY",       // GeminiGen.AI — images + img2vid (no rate limit on most models)
-  "LABS69_API_KEY",          // 69labs — ElevenLabs TTS voices
+  "GEMINIGEN_API_KEY",       // GeminiGen.AI — images + img2vid + TTS (no rate limit on most models)
 
   // ── Optional / backup providers ───────────────────────────────────
+  "LABS69_API_KEY",          // 69labs — optional fallback for ElevenLabs voices
   "ELEVENLABS_API_KEY",      // direct ElevenLabs (without 69labs)
   "REPLICATE_API_TOKEN",     // Replicate (Flux / Kling)
   "ANTHROPIC_API_KEY",       // Claude (alternative to Gemini)
@@ -26,11 +26,15 @@ export const SETTING_KEYS = [
   "SCENE_SPLIT_MODEL",       // e.g. gemini-flash-latest, claude-sonnet-4-6
 
   // ── Text-to-Speech ────────────────────────────────────────────────
-  "TTS_PROVIDER",            // 69labs | elevenlabs | openai
-  "TTS_VOICE_PROVIDER",      // For 69labs: edgetts | elevenlabs | voice-clone
-  "TTS_VOICE_ID",            // Voice id (ElevenLabs / Edge / clone UUID)
-  "TTS_MODEL",               // e.g. eleven_multilingual_v2
-  "TTS_SPLIT_TYPE",          // smart | paragraphs | max_length
+  "TTS_PROVIDER",            // geminigen | 69labs | elevenlabs | openai
+  "TTS_VOICE_PROVIDER",      // 69labs only: edgetts | elevenlabs | voice-clone
+  "TTS_VOICE_ID",            // Voice id (GeminiGen / ElevenLabs / Edge / clone UUID)
+  "TTS_VOICE_NAME",          // GeminiGen: voice display name alongside id
+  "TTS_MODEL",               // e.g. tts-flash (geminigen), eleven_multilingual_v2
+  "TTS_SPLIT_TYPE",          // 69labs only: smart | paragraphs | max_length
+  "TTS_OUTPUT_FORMAT",       // geminigen: mp3 | wav
+  "TTS_EMOTION",             // geminigen: optional emotion (Casual, Excited, ...)
+  "TTS_CUSTOM_PROMPT",       // geminigen: free-form style instruction
 
   // ── ElevenLabs voice fine-tuning ──────────────────────────────────
   "TTS_SPEED",               // 0.7–1.2 (lower = slower)
@@ -135,15 +139,20 @@ export const DEFAULTS: Record<SettingKey, string> = {
   SCENE_SPLIT_PROVIDER: "google",
   SCENE_SPLIT_MODEL: "gemini-flash-latest",
 
-  // TTS
-  TTS_PROVIDER: "69labs",
-  TTS_VOICE_PROVIDER: "edgetts",
-  TTS_VOICE_ID: "en-US-GuyNeural",
-  TTS_MODEL: "",
+  // TTS — GeminiGen by default (no rate limit, same key as images/video)
+  TTS_PROVIDER: "geminigen",
+  TTS_VOICE_PROVIDER: "elevenlabs",  // only used when TTS_PROVIDER=69labs
+  TTS_VOICE_ID: "",                  // user must set in /settings (geminigen voice id from dashboard)
+  TTS_VOICE_NAME: "",                // geminigen voice display name
+  TTS_MODEL: "tts-flash",            // geminigen Gemini 2.5 Flash TTS
   TTS_SPLIT_TYPE: "smart",
+  TTS_OUTPUT_FORMAT: "mp3",
+  TTS_EMOTION: "",
+  TTS_CUSTOM_PROMPT: "",
 
-  // Voice fine-tuning (slightly slower + small style for documentary feel)
-  TTS_SPEED: "0.93",
+  // Voice fine-tuning. For GeminiGen TTS, speed is 0.25–4.0 (1.0 = normal).
+  // For 69labs/ElevenLabs the same field is clamped to 0.7–1.2 internally.
+  TTS_SPEED: "1.0",
   TTS_STABILITY: "0.6",
   TTS_SIMILARITY_BOOST: "0.75",
   TTS_STYLE: "0.15",

@@ -24,7 +24,7 @@ interface Group {
 const GROUPS: Group[] = [
   {
     title: "Required API Keys",
-    subtitle: "Three keys are needed to run the pipeline. Conveyer 2.0 splits responsibilities across services that each excel at one thing.",
+    subtitle: "Two keys are needed to run the pipeline. GeminiGen.AI handles images, video animation AND voice narration — no per-account rate limits on its core models.",
     required: true,
     fields: [
       {
@@ -35,15 +35,20 @@ const GROUPS: Group[] = [
       },
       {
         key: "GEMINIGEN_API_KEY",
-        desc: "GeminiGen.AI key for images and video animation (Veo). The default image model (nano-banana-2) has no rate limit, so the pipeline can fire as many parallel requests as IMAGE_CONCURRENCY allows.",
+        desc: "GeminiGen.AI key for images (nano-banana-2), video animation (Veo) AND text-to-speech (Gemini TTS). One key powers the entire generation phase with no per-account rate limit.",
         examples: "Sign up at https://geminigen.ai → Service Integration → API keys",
         required: true,
       },
+    ],
+  },
+  {
+    title: "Optional / Fallback Providers",
+    subtitle: "Only needed if you want alternative TTS or image providers. The default pipeline uses GeminiGen.AI for everything.",
+    fields: [
       {
         key: "LABS69_API_KEY",
-        desc: "69labs.vip key — used ONLY for ElevenLabs voice narration (best documentary-style TTS). Images and videos go through GeminiGen.AI instead.",
+        desc: "Optional — 69labs.vip gateway for ElevenLabs voices. Use this only if you prefer an ElevenLabs voice over Gemini TTS and want to switch TTS_PROVIDER to `69labs` below.",
         examples: "Sign up at https://69labs.vip → Account → API keys. Starts with vk_",
-        required: true,
       },
     ],
   },
@@ -81,31 +86,51 @@ const GROUPS: Group[] = [
   },
   {
     title: "Voice Over (TTS)",
-    subtitle: "Picks the narrator voice and which TTS service generates the audio.",
+    subtitle: "Picks the narrator voice and which TTS service generates the audio. Default is GeminiGen.AI (Gemini TTS) — same key as images/video, 400+ voices, no rate limit.",
     fields: [
       {
         key: "TTS_PROVIDER",
-        desc: "Top-level routing of TTS jobs. `69labs` is the default and covers all sub-providers below. Direct `elevenlabs` skips 69labs and uses ElevenLabs API key. `openai` uses gpt-4o-mini-tts.",
-        examples: "69labs  /  elevenlabs  /  openai",
-      },
-      {
-        key: "TTS_VOICE_PROVIDER",
-        desc: "Inside 69labs, picks which voice family to use. ElevenLabs gives best quality. Edge TTS is free (Microsoft voices). Voice-clone uses celebrity clones (Lex Fridman, Joe Rogan, etc).",
-        examples: "elevenlabs  /  edgetts  /  voice-clone",
+        desc: "Top-level routing of TTS jobs. `geminigen` (default) uses Gemini TTS through your GEMINIGEN_API_KEY. `69labs` routes through 69labs's ElevenLabs gateway (needs LABS69_API_KEY). `elevenlabs` calls ElevenLabs directly. `openai` uses gpt-4o-mini-tts.",
+        examples: "geminigen (default)  /  69labs  /  elevenlabs  /  openai",
       },
       {
         key: "TTS_VOICE_ID",
-        desc: "The specific voice. Format depends on the voice-provider above. For ElevenLabs: voice ID from their library. For Edge: locale + voice name. For voice-clone: UUID from 69labs library.",
-        examples: "ElevenLabs Christopher: G17SuINrv2H9FC6nvetn — Edge: en-US-GuyNeural, en-GB-RyanNeural, en-US-AriaNeural",
+        desc: "REQUIRED. The specific voice ID. For GeminiGen: sign in at https://geminigen.ai/app/speech-gen → Gemini Voices tab → click a voice → copy its ID. For ElevenLabs: voice ID from their library. For Edge TTS: locale + voice name.",
+        examples: "GeminiGen Gemini Voice: e.g. Kore, Puck, Charon — ElevenLabs Christopher: G17SuINrv2H9FC6nvetn — Edge: en-US-GuyNeural",
+      },
+      {
+        key: "TTS_VOICE_NAME",
+        desc: "GeminiGen REQUIRES the voice display name alongside the ID. Copy the same name shown next to the voice in the Gemini Voices dashboard. For other providers this field is ignored.",
+        examples: "Kore, Puck, Charon, Aoede, Zephyr, Leda, Orus, Fenrir",
       },
       {
         key: "TTS_MODEL",
-        desc: "Optional model override. For ElevenLabs `eleven_multilingual_v2` is the high-quality default. `eleven_flash_v2_5` is faster but slightly less expressive. Leave empty to use provider default.",
-        examples: "eleven_multilingual_v2, eleven_flash_v2_5, gpt-4o-mini-tts",
+        desc: "TTS model id. `tts-flash` (default) = Gemini 2.5 Flash TTS (fast, expressive). For ElevenLabs use `eleven_multilingual_v2`. For OpenAI use `gpt-4o-mini-tts`.",
+        examples: "tts-flash (geminigen default), eleven_multilingual_v2, gpt-4o-mini-tts",
+      },
+      {
+        key: "TTS_OUTPUT_FORMAT",
+        desc: "GeminiGen only — audio container. mp3 is smaller and universal, wav is uncompressed.",
+        examples: "mp3 (default)  /  wav",
+      },
+      {
+        key: "TTS_EMOTION",
+        desc: "GeminiGen only — preset emotion that shapes delivery. Leave empty for neutral narration. Useful for documentary tone (`Firm`, `Informative`) or upbeat clips (`Excited`).",
+        examples: "Casual, Excited, Firm, Informative, Whisper, Bedtime  ·  empty = neutral",
+      },
+      {
+        key: "TTS_CUSTOM_PROMPT",
+        desc: "GeminiGen only — free-form style instruction. Overrides preset emotions. Use for fine-grained vocal direction (e.g. `slow documentary narrator with thoughtful pauses`).",
+        examples: "calm documentary narrator  ·  energetic news anchor  ·  bedtime story whisper",
+      },
+      {
+        key: "TTS_VOICE_PROVIDER",
+        desc: "69labs ONLY — which voice family inside 69labs. ElevenLabs = best quality. Edge TTS = free Microsoft voices. Voice-clone = celebrity clones. Ignored when TTS_PROVIDER is geminigen/elevenlabs/openai.",
+        examples: "elevenlabs  /  edgetts  /  voice-clone",
       },
       {
         key: "TTS_SPLIT_TYPE",
-        desc: "How the TTS service chunks your text internally. `smart` splits at sentence boundaries (best for narration). `paragraphs` only at paragraph breaks. `max_length` uses fixed sizes.",
+        desc: "69labs ONLY — how the service chunks text internally. `smart` splits at sentence boundaries (best for narration). Ignored by GeminiGen.",
         examples: "smart  /  paragraphs  /  max_length",
       },
     ],
