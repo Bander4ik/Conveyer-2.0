@@ -6,14 +6,18 @@ like [The Sky Lab](https://www.youtube.com/@TheSkyLab-u4j) and
 **script → scenes → voiceover + visuals → final MP4**.
 
 > 🚀 **What changed in v2.0:**
-> - **Single provider**: the entire generation phase (images, Veo img2vid AND TTS)
->   goes through [GeminiGen.AI](https://geminigen.ai). One key, no rate limits on
->   the core models. **69labs is gone entirely.**
+> - **Visuals through GeminiGen.AI**: images (`nano-banana-pro` 2K keyframes) and
+>   Veo 3.1 video animation through one key. No rate limits on the core models.
+>   **69labs is gone entirely.**
 > - **Every scene is a Veo clip** by default (no more 50/50 photo+video mix). The
 >   image is generated as the keyframe for img2vid. Switch `ANIMATION_PROVIDER`
 >   to `off` in `/settings` to fall back to Ken-Burns photos and save credits.
-> - **Max-quality defaults**: `nano-banana-pro` images at 2K, `veo-3.1` (full) at
->   1080p, Gemini TTS with 400+ voices.
+> - **Narration through [algrow.online](https://algrow.online)**: 33+ voices
+>   from ElevenLabs + Stealth catalogs with **5-second audio previews** built
+>   into `/settings` so you can audition voices before picking one. (GeminiGen's
+>   own TTS isn't on their public API yet.)
+> - **Max-quality defaults**: nano-banana-pro images, veo-3.1 (full) at 1080p,
+>   ElevenLabs voices via Algrow.
 
 > 👋 **Brand new and don't know what npm / Node / API keys are?**
 > Read [SETUP.md](./SETUP.md) — a non-technical step-by-step install guide that walks you
@@ -65,21 +69,22 @@ Then open http://localhost:3000.
 > normally. If you see "Operation not permitted", run `chmod +x *.command` in Terminal first.
 
 ### Required keys
-Open `/settings`. The top section, **Required API Keys**, shows the two keys you must
+Open `/settings`. The top section, **Required API Keys**, shows the three keys you must
 provide before anything works:
 
 1. **`GOOGLE_API_KEY`** — Google AI Studio (Gemini) for scene splitting. Free tier is
    plenty. Get one at https://aistudio.google.com/app/apikey
-2. **`GEMINIGEN_API_KEY`** — GeminiGen.AI for images (nano-banana-2), Veo img2vid AND
-   TTS (Gemini TTS). One key for the entire generation phase, no per-account rate
-   limits on the core models. Sign up at https://geminigen.ai
+2. **`GEMINIGEN_API_KEY`** — GeminiGen.AI for image keyframes (nano-banana-pro) and
+   Veo 3.1 video animation. No per-account rate limits on the core models.
+   Sign up at https://geminigen.ai
+3. **`ALGROW_API_KEY`** — Algrow.online for TTS narration. 33+ ElevenLabs + Stealth
+   voices to pick from with 5-second preview clips. Requires Professional or
+   Ultimate plan on Algrow's side. Sign up at https://algrow.online
 
-You also need to pick a TTS voice once:
-- Open https://geminigen.ai/app/speech-gen → **Gemini Voices** tab → click any voice
-- Copy its ID and name into `TTS_VOICE_ID` and `TTS_VOICE_NAME` at `/settings`
-
-That's it. Optional: paste `ELEVENLABS_API_KEY` only if you'd rather use an
-ElevenLabs voice instead of Gemini TTS, then switch `TTS_PROVIDER` to `elevenlabs`.
+After pasting the keys:
+- Click **🎙 Browse voices** in `/settings` (next to TTS_VOICE_ID).
+- Audition voices with the ▶ Preview buttons, click **Select** on the one you want.
+- TTS_VOICE_ID / TTS_VOICE_NAME / TTS_VOICE_PROVIDER are filled and saved automatically.
 
 ### Quality vs throughput
 
@@ -91,7 +96,7 @@ Defaults are tuned for **maximum quality**, suitable for premium YouTube content
 | Image res | `2K` | Visibly sharper than 1K, perfect base for 1080p video | Costs more credits |
 | Video | `veo-3.1` (full) | Latest top-quality Veo with enhanced capabilities | Slowest, most credits per clip |
 | Video res | `1080p` | Matches YouTube HD output | More credits vs 720p |
-| TTS | `tts-flash` (Gemini 2.5 Flash) | Fast + expressive, 200ms latency, 400+ voices | Switch to `tts-pro` (Gemini 2.5 Pro TTS) for audiophile fidelity if you're on a paid GeminiGen plan |
+| TTS | Algrow ElevenLabs (`eleven_multilingual_v2`) | 33+ browseable voices with audio previews | Switch to `stealth` catalog or direct ElevenLabs/OpenAI if needed |
 
 **To trade quality for speed/cost** (e.g. for bulk 20+ scene runs): switch to
 `nano-banana-2` (no rate limit), `veo-3.1-fast`, `720p` and raise concurrency
@@ -109,7 +114,7 @@ script
   │  each scene: { text, visual_prompt, duration_hint_sec }
   ▼
 [2] for each scene, in parallel (with concurrency limits):
-       ├─ TTS (GeminiGen.AI Gemini TTS) → mp3
+       ├─ TTS (Algrow ElevenLabs voices) → mp3
        ├─ image (GeminiGen.AI nano-banana-pro) → png (keyframe for img2vid)
        └─ img2vid (GeminiGen.AI Veo 3.1) → mp4 — EVERY scene gets a video clip in v2
   │

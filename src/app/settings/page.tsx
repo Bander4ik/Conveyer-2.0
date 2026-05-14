@@ -1,5 +1,265 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Algrow voice picker modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface AlgrowVoice {
+  voice_id: string;
+  name: string;
+  gender?: string | null;
+  accent?: string | null;
+  age?: string | null;
+  language?: string | null;
+  use_case?: string | null;
+  description?: string | null;
+  preview_url?: string | null;
+  category?: string | null;
+  provider?: string;
+}
+
+function VoicePickerModal(props: {
+  currentVoiceId: string;
+  onClose: () => void;
+  onPick: (voice: AlgrowVoice) => void;
+}) {
+  const [catalog, setCatalog] = useState<"elevenlabs" | "stealth">("elevenlabs");
+  const [search, setSearch] = useState("");
+  const [gender, setGender] = useState("");
+  const [language, setLanguage] = useState("");
+  const [accent, setAccent] = useState("");
+  const [voices, setVoices] = useState<AlgrowVoice[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
+  const load = useCallback(async (resetPage = false) => {
+    setLoading(true);
+    setError(null);
+    const targetPage = resetPage ? 1 : page;
+    const qs = new URLSearchParams({ catalog, page: String(targetPage), page_size: "30" });
+    if (search) qs.set("search", search);
+    if (gender) qs.set("gender", gender);
+    if (language) qs.set("language", language);
+    if (accent) qs.set("accent", accent);
+    try {
+      const r = await fetch(`/api/voices?${qs}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+      if (resetPage) {
+        setVoices(j.voices || []);
+        setPage(1);
+      } else {
+        setVoices((prev) => (targetPage === 1 ? j.voices || [] : [...prev, ...(j.voices || [])]));
+      }
+      setHasMore(!!j.has_more);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [catalog, search, gender, language, accent, page]);
+
+  // Initial load + reload on catalog change
+  useEffect(() => { load(true); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [catalog]);
+
+  function playPreview(v: AlgrowVoice) {
+    if (!v.preview_url) return;
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    if (playingId === v.voice_id) {
+      // toggle stop
+      setPlayingId(null);
+      return;
+    }
+    const a = new Audio(v.preview_url);
+    audioRef.current = a;
+    a.onended = () => setPlayingId(null);
+    a.onerror = () => setPlayingId(null);
+    a.play().catch(() => setPlayingId(null));
+    setPlayingId(v.voice_id);
+  }
+
+  function close() {
+    if (audioRef.current) audioRef.current.pause();
+    props.onClose();
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 100, padding: 16,
+      }}
+      onClick={close}
+    >
+      <div
+        className="card"
+        style={{
+          width: "min(960px, 100%)", maxHeight: "92vh", display: "flex", flexDirection: "column",
+          padding: 0, overflow: "hidden",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #2a2a3a", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Browse voices (Algrow)</h2>
+          <button className="btn-secondary" onClick={close}>Close</button>
+        </div>
+
+        {/* Catalog tabs */}
+        <div style={{ display: "flex", gap: 4, padding: "8px 16px 0", borderBottom: "1px solid #2a2a3a" }}>
+          {(["elevenlabs", "stealth"] as const).map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setCatalog(cat)}
+              style={{
+                padding: "8px 16px", border: "none",
+                background: catalog === cat ? "#2a2a3a" : "transparent",
+                color: catalog === cat ? "#fff" : "#9090a8",
+                fontWeight: catalog === cat ? 700 : 500,
+                borderRadius: "8px 8px 0 0", cursor: "pointer",
+              }}
+            >
+              {cat === "elevenlabs" ? "ElevenLabs" : "Stealth"}
+            </button>
+          ))}
+        </div>
+
+        {/* Filters */}
+        <div style={{ padding: "12px 16px", display: "flex", gap: 8, flexWrap: "wrap", borderBottom: "1px solid #2a2a3a" }}>
+          <input
+            className="input"
+            placeholder="Search by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && load(true)}
+            style={{ flex: "1 1 200px", minWidth: 160 }}
+          />
+          {catalog === "elevenlabs" && (
+            <>
+              <select className="input" value={gender} onChange={(e) => { setGender(e.target.value); }} style={{ flex: "0 0 120px" }}>
+                <option value="">Any gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+              <select className="input" value={language} onChange={(e) => { setLanguage(e.target.value); }} style={{ flex: "0 0 130px" }}>
+                <option value="">Any language</option>
+                <option value="English">English</option>
+                <option value="Spanish">Spanish</option>
+                <option value="French">French</option>
+                <option value="German">German</option>
+                <option value="Italian">Italian</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="Ukrainian">Ukrainian</option>
+                <option value="Russian">Russian</option>
+              </select>
+              <select className="input" value={accent} onChange={(e) => { setAccent(e.target.value); }} style={{ flex: "0 0 130px" }}>
+                <option value="">Any accent</option>
+                <option value="American">American</option>
+                <option value="British">British</option>
+                <option value="Australian">Australian</option>
+              </select>
+            </>
+          )}
+          <button className="btn" onClick={() => load(true)} disabled={loading}>
+            {loading ? "Loading…" : "Apply filters"}
+          </button>
+        </div>
+
+        {/* Voice list */}
+        <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+          {error && (
+            <div style={{ background: "#3a1d1d", border: "1px solid #ff6d6d", color: "#ff8888", padding: 12, borderRadius: 8, marginBottom: 12 }}>
+              {error}
+            </div>
+          )}
+          {voices.length === 0 && !loading && !error && (
+            <div style={{ color: "#8a8aa0", textAlign: "center", padding: 32 }}>
+              No voices found.
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+            {voices.map((v) => {
+              const isCurrent = v.voice_id === props.currentVoiceId;
+              const isPlaying = playingId === v.voice_id;
+              return (
+                <div
+                  key={v.voice_id}
+                  style={{
+                    border: isCurrent ? "2px solid #4caf50" : "1px solid #2a2a3a",
+                    borderRadius: 10,
+                    padding: 12,
+                    background: "#16161e",
+                    display: "flex", flexDirection: "column", gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{v.name}</div>
+                    {isCurrent && <span style={{ fontSize: 10, color: "#4caf50", fontWeight: 700 }}>CURRENT</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 11, color: "#8a8aa0" }}>
+                    {v.gender && <Tag>{v.gender}</Tag>}
+                    {v.accent && <Tag>{v.accent}</Tag>}
+                    {v.language && <Tag>{v.language}</Tag>}
+                    {v.age && <Tag>{v.age}</Tag>}
+                    {v.use_case && <Tag>{v.use_case}</Tag>}
+                  </div>
+                  {v.description && (
+                    <div style={{ fontSize: 12, color: "#a8a8b8", lineHeight: 1.4 }}>{v.description}</div>
+                  )}
+                  <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => playPreview(v)}
+                      disabled={!v.preview_url}
+                      style={{ flex: 1, fontSize: 12 }}
+                    >
+                      {isPlaying ? "⏸ Stop" : "▶ Preview"}
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => props.onPick(v)}
+                      style={{ flex: 1, fontSize: 12 }}
+                    >
+                      {isCurrent ? "✓ Selected" : "Select"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {hasMore && (
+            <div style={{ textAlign: "center", marginTop: 16 }}>
+              <button
+                className="btn-secondary"
+                disabled={loading}
+                onClick={() => { setPage((p) => p + 1); setTimeout(() => load(false), 0); }}
+              >
+                {loading ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tag({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ background: "#2a2a3a", padding: "2px 6px", borderRadius: 4, fontSize: 10, color: "#b8b8c8" }}>
+      {children}
+    </span>
+  );
+}
+
 
 interface Field {
   key: string;
@@ -24,7 +284,7 @@ interface Group {
 const GROUPS: Group[] = [
   {
     title: "Required API Keys",
-    subtitle: "Two keys are needed to run the pipeline. GeminiGen.AI handles images, video animation AND voice narration — no per-account rate limits on its core models.",
+    subtitle: "Three keys power the pipeline: Google Gemini for script splitting, GeminiGen.AI for images + Veo video, and Algrow for TTS narration with 33+ voices to choose from.",
     required: true,
     fields: [
       {
@@ -35,8 +295,14 @@ const GROUPS: Group[] = [
       },
       {
         key: "GEMINIGEN_API_KEY",
-        desc: "GeminiGen.AI key for images (nano-banana-2), video animation (Veo) AND text-to-speech (Gemini TTS). One key powers the entire generation phase with no per-account rate limit.",
+        desc: "GeminiGen.AI key for images (nano-banana-pro keyframes) and Veo 3.1 video animation. No per-account rate limit on the core models.",
         examples: "Sign up at https://geminigen.ai → Service Integration → API keys",
+        required: true,
+      },
+      {
+        key: "ALGROW_API_KEY",
+        desc: "Algrow key for narration. Algrow proxies ElevenLabs + Stealth voices (33+ voices total) under one API and gives 5-second previews of each. Requires a Professional or Ultimate plan on Algrow's side.",
+        examples: "Sign up at https://algrow.online → Settings → API Keys → Generate",
         required: true,
       },
     ],
@@ -75,47 +341,52 @@ const GROUPS: Group[] = [
   },
   {
     title: "Voice Over (TTS)",
-    subtitle: "Picks the narrator voice and which TTS service generates the audio. Default is GeminiGen.AI (Gemini TTS) — same key as images/video, 400+ voices, no rate limit.",
+    subtitle: "Algrow.online proxies ElevenLabs + Stealth voices (33+ to pick from). Click 'Browse voices' below to audition 5-second previews and pick one — TTS_VOICE_ID / TTS_VOICE_NAME / TTS_VOICE_PROVIDER are filled automatically.",
     fields: [
       {
         key: "TTS_PROVIDER",
-        desc: "Top-level routing of TTS jobs. `geminigen` (default) uses Gemini TTS through your GEMINIGEN_API_KEY. `elevenlabs` calls ElevenLabs directly with ELEVENLABS_API_KEY. `openai` uses gpt-4o-mini-tts with OPENAI_API_KEY.",
-        examples: "geminigen (default)  /  elevenlabs  /  openai",
+        desc: "Top-level routing. `algrow` (default) goes through algrow.online with browseable voices. `elevenlabs` calls ElevenLabs directly (needs ELEVENLABS_API_KEY). `openai` uses gpt-4o-mini-tts (needs OPENAI_API_KEY).",
+        examples: "algrow (default)  /  elevenlabs  /  openai",
       },
       {
         key: "TTS_VOICE_ID",
-        desc: "REQUIRED. The specific voice ID. For GeminiGen: sign in at https://geminigen.ai/app/speech-gen → Gemini Voices tab → click a voice → copy its ID. For ElevenLabs: voice ID from their library. For Edge TTS: locale + voice name.",
-        examples: "GeminiGen Gemini Voice: e.g. Kore, Puck, Charon — ElevenLabs Christopher: G17SuINrv2H9FC6nvetn — Edge: en-US-GuyNeural",
+        desc: "Voice ID. Click the 'Browse voices' button above the field to pick from Algrow's catalog with audio previews. Manual entry is also fine if you know the ID.",
+        examples: "(filled automatically by Browse voices)",
       },
       {
         key: "TTS_VOICE_NAME",
-        desc: "GeminiGen REQUIRES the voice display name alongside the ID. Copy the same name shown next to the voice in the Gemini Voices dashboard. For other providers this field is ignored.",
-        examples: "Kore, Puck, Charon, Aoede, Zephyr, Leda, Orus, Fenrir",
+        desc: "Human-readable name of the picked voice (for logs and filenames). Auto-filled when you pick via Browse voices.",
+        examples: "(auto-filled)",
+      },
+      {
+        key: "TTS_VOICE_PROVIDER",
+        desc: "Algrow sub-catalog the voice belongs to. Auto-set when you pick via Browse voices. `elevenlabs` = ElevenLabs voices, `stealth` = Stealth voices (different catalog with its own voices).",
+        examples: "elevenlabs (default)  /  stealth",
       },
       {
         key: "TTS_MODEL",
-        desc: "TTS model id. `tts-flash` (default) = Gemini 2.5 Flash TTS — fast and expressive, ~200ms latency, perfect for narration. `tts-pro` = Gemini 2.5 Pro TTS — audiophile quality, better at interpreting nuanced style prompts/emotions (450ms latency, may need paid GeminiGen plan). For ElevenLabs use `eleven_multilingual_v2`. For OpenAI use `gpt-4o-mini-tts`.",
-        examples: "tts-flash (default, fast+great), tts-pro (audiophile, premium plan), eleven_multilingual_v2",
+        desc: "ElevenLabs model id (used when the picked voice is in the ElevenLabs catalog). `eleven_multilingual_v2` is the high-quality default. `eleven_flash_v2_5` is faster but slightly less expressive.",
+        examples: "eleven_multilingual_v2 (default), eleven_flash_v2_5",
       },
       {
-        key: "TTS_OUTPUT_FORMAT",
-        desc: "GeminiGen only — audio container. mp3 is smaller and universal, wav is uncompressed.",
-        examples: "mp3 (default)  /  wav",
+        key: "TTS_STABILITY",
+        desc: "ElevenLabs only. How consistent the voice sounds across the whole audio. Higher = more uniform, less variation. Lower = more expressive but can sometimes wobble.",
+        examples: "Range 0–1  ·  default 0.6 (balanced for narration)",
       },
       {
-        key: "TTS_EMOTION",
-        desc: "GeminiGen only — preset emotion that shapes delivery. Leave empty for neutral narration. Useful for documentary tone (`Firm`, `Informative`) or upbeat clips (`Excited`).",
-        examples: "Casual, Excited, Firm, Informative, Whisper, Bedtime  ·  empty = neutral",
+        key: "TTS_SIMILARITY_BOOST",
+        desc: "ElevenLabs only. How closely the synthesized voice matches the source reference. Higher = more faithful to the original voice's character.",
+        examples: "Range 0–1  ·  default 0.75",
       },
       {
-        key: "TTS_CUSTOM_PROMPT",
-        desc: "GeminiGen only — free-form style instruction. Overrides preset emotions. Use for fine-grained vocal direction (e.g. `slow documentary narrator with thoughtful pauses`).",
-        examples: "calm documentary narrator  ·  energetic news anchor  ·  bedtime story whisper",
+        key: "TTS_STYLE",
+        desc: "ElevenLabs only. Expressiveness. 0 = calm, even delivery. Higher values inject more emotional inflection. Documentary voices usually sit around 0.1–0.2.",
+        examples: "Range 0–1  ·  default 0.15",
       },
       {
         key: "TTS_SPEED",
-        desc: "Speech rate. 1.0 = neutral pace. For GeminiGen TTS the range is 0.25–4.0. For ElevenLabs it's clamped to 0.7–1.2 internally. Lower = slower, more cinematic narration.",
-        examples: "Range 0.25–4.0 (geminigen)  ·  default 1.0  ·  0.85 for slow documentary",
+        desc: "Speech rate. 1.0 = neutral pace. Clamped to ElevenLabs range 0.7–1.2 server-side. Lower = slower, more cinematic narration.",
+        examples: "Range 0.7–1.2  ·  default 1.0  ·  0.93 for slow documentary",
       },
     ],
   },
@@ -295,6 +566,7 @@ export default function SettingsPage() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [revealing, setRevealing] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function load(reveal = false) {
     const r = await fetch(`/api/settings${reveal ? "?reveal=1" : ""}`);
@@ -399,15 +671,38 @@ export default function SettingsPage() {
                     <span style={{ color: "#ff6d6d", fontSize: 10, fontWeight: 700 }}>required</span>
                   )}
                 </div>
-                <input
-                  className="input"
-                  value={values[f.key] ?? ""}
-                  placeholder={f.examples ? `e.g. ${f.examples}` : ""}
-                  onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
-                  style={{
-                    borderColor: f.required && !values[f.key] ? "#ff6d6d" : undefined,
-                  }}
-                />
+                {f.key === "TTS_VOICE_ID" ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      className="input"
+                      value={values[f.key] ?? ""}
+                      placeholder="(pick via Browse voices)"
+                      onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                      style={{
+                        flex: 1,
+                        borderColor: f.required && !values[f.key] ? "#ff6d6d" : undefined,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setPickerOpen(true)}
+                      style={{ whiteSpace: "nowrap" }}
+                    >
+                      🎙 Browse voices
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    className="input"
+                    value={values[f.key] ?? ""}
+                    placeholder={f.examples ? `e.g. ${f.examples}` : ""}
+                    onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                    style={{
+                      borderColor: f.required && !values[f.key] ? "#ff6d6d" : undefined,
+                    }}
+                  />
+                )}
                 <div
                   style={{
                     color: "#9090a8",
@@ -428,6 +723,40 @@ export default function SettingsPage() {
           </div>
         </div>
       ))}
+
+      {pickerOpen && (
+        <VoicePickerModal
+          currentVoiceId={values.TTS_VOICE_ID || ""}
+          onClose={() => setPickerOpen(false)}
+          onPick={async (voice) => {
+            // Set all three correlated fields at once. Save them via the
+            // settings API directly so the picker also works without the
+            // user remembering to click "Save all changes".
+            const next = {
+              ...values,
+              TTS_VOICE_ID: voice.voice_id,
+              TTS_VOICE_NAME: voice.name,
+              TTS_VOICE_PROVIDER: voice.provider || "elevenlabs",
+            };
+            setValues(next);
+            // Persist immediately (filter masked secret values just like save())
+            const cleaned: Record<string, string> = {};
+            for (const [k, v] of Object.entries(next)) {
+              const isSecret = k.includes("KEY") || k.includes("TOKEN");
+              if (isSecret && typeof v === "string" && v.includes("…")) continue;
+              cleaned[k] = v;
+            }
+            await fetch("/api/settings", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(cleaned),
+            });
+            setSaved(true);
+            setTimeout(() => setSaved(false), 1500);
+            setPickerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

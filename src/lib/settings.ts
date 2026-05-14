@@ -7,10 +7,11 @@ import db from "./db";
 export const SETTING_KEYS = [
   // ── Required API keys ─────────────────────────────────────────────
   "GOOGLE_API_KEY",          // Gemini — scene splitting
-  "GEMINIGEN_API_KEY",       // GeminiGen.AI — images + img2vid + TTS (no rate limit on most models)
+  "GEMINIGEN_API_KEY",       // GeminiGen.AI — images + img2vid (Veo)
+  "ALGROW_API_KEY",          // algrow.online — TTS narration (ElevenLabs / Stealth voices, 33+ to pick from)
 
   // ── Optional / backup providers ───────────────────────────────────
-  "ELEVENLABS_API_KEY",      // direct ElevenLabs (only if you want ElevenLabs instead of Gemini TTS)
+  "ELEVENLABS_API_KEY",      // direct ElevenLabs (fallback when TTS_PROVIDER=elevenlabs)
   "REPLICATE_API_TOKEN",     // Replicate (Flux / Kling)
   "ANTHROPIC_API_KEY",       // Claude (alternative to Gemini)
   "OPENAI_API_KEY",          // OpenAI TTS / image backup
@@ -25,16 +26,15 @@ export const SETTING_KEYS = [
   "SCENE_SPLIT_MODEL",       // e.g. gemini-flash-latest, claude-sonnet-4-6
 
   // ── Text-to-Speech ────────────────────────────────────────────────
-  "TTS_PROVIDER",            // geminigen | elevenlabs | openai
-  "TTS_VOICE_ID",            // Voice id (GeminiGen voice id, ElevenLabs id, OpenAI voice name)
-  "TTS_VOICE_NAME",          // GeminiGen: voice display name alongside id
-  "TTS_MODEL",               // e.g. tts-flash (geminigen), eleven_multilingual_v2
-  "TTS_OUTPUT_FORMAT",       // geminigen: mp3 | wav
-  "TTS_EMOTION",             // geminigen: optional emotion (Casual, Excited, ...)
-  "TTS_CUSTOM_PROMPT",       // geminigen: free-form style instruction
-
-  // ── TTS speed (works on geminigen, elevenlabs, openai) ───────────
-  "TTS_SPEED",               // GeminiGen: 0.25–4.0 (1.0 = normal). ElevenLabs: 0.7–1.2.
+  "TTS_PROVIDER",            // algrow (default) | elevenlabs | openai
+  "TTS_VOICE_PROVIDER",      // algrow only: elevenlabs | stealth — which catalog the voice came from
+  "TTS_VOICE_ID",            // Voice id from the chosen catalog
+  "TTS_VOICE_NAME",          // Voice display name (for logs + filenames)
+  "TTS_MODEL",               // e.g. eleven_multilingual_v2 (algrow elevenlabs) or empty
+  "TTS_STABILITY",           // algrow elevenlabs: 0–1 voice stability
+  "TTS_SIMILARITY_BOOST",    // algrow elevenlabs: 0–1
+  "TTS_STYLE",               // algrow elevenlabs: 0–1 expressiveness
+  "TTS_SPEED",               // 0.7–1.2 ElevenLabs range
 
   // ── Images ────────────────────────────────────────────────────────
   "IMAGE_PROVIDER",          // geminigen | replicate | openai | fal
@@ -110,6 +110,7 @@ export const DEFAULTS: Record<SettingKey, string> = {
   // Required API keys — empty by default, user must provide
   GOOGLE_API_KEY: "",
   GEMINIGEN_API_KEY: "",
+  ALGROW_API_KEY: "",
 
   // Optional providers
   ELEVENLABS_API_KEY: "",
@@ -126,14 +127,16 @@ export const DEFAULTS: Record<SettingKey, string> = {
   SCENE_SPLIT_PROVIDER: "google",
   SCENE_SPLIT_MODEL: "gemini-flash-latest",
 
-  // TTS — GeminiGen by default (no rate limit, same key as images/video)
-  TTS_PROVIDER: "geminigen",
-  TTS_VOICE_ID: "",                  // user must set in /settings (geminigen voice id from dashboard)
-  TTS_VOICE_NAME: "",                // geminigen voice display name
-  TTS_MODEL: "tts-flash",            // geminigen Gemini 2.5 Flash TTS
-  TTS_OUTPUT_FORMAT: "mp3",
-  TTS_EMOTION: "",
-  TTS_CUSTOM_PROMPT: "",
+  // TTS — algrow.online by default. Browse + preview voices in /settings
+  // (Browse voices button → modal with 5-second audio samples).
+  TTS_PROVIDER: "algrow",
+  TTS_VOICE_PROVIDER: "elevenlabs",   // algrow sub-catalog: elevenlabs (default) or stealth
+  TTS_VOICE_ID: "",                   // user picks via Browse voices modal
+  TTS_VOICE_NAME: "",                 // auto-filled when a voice is picked
+  TTS_MODEL: "eleven_multilingual_v2",
+  TTS_STABILITY: "0.6",
+  TTS_SIMILARITY_BOOST: "0.75",
+  TTS_STYLE: "0.15",
   TTS_SPEED: "1.0",
 
   // Images — GeminiGen.AI Gemini 3 Pro Image (nano-banana-pro) for maximum
@@ -198,27 +201,50 @@ export function seedDefaults() {
  * "every scene is a Veo clip" pipeline.
  */
 function migrateLegacyValues() {
-  const flagRow = getStmt.get("_migration_v2_video_only") as { value: string } | undefined;
-  if (flagRow?.value === "1") return;
+  // Two staged migrations, each tracked by its own flag.
 
-  const forceTo: Array<[string, (current: string) => string | null]> = [
-    // 69labs → geminigen for every provider field
-    ["TTS_PROVIDER", (v) => (v === "69labs" ? "geminigen" : null)],
-    ["IMAGE_PROVIDER", (v) => (v === "69labs" ? "geminigen" : null)],
-    ["ANIMATION_PROVIDER", (v) => (v === "69labs" || v === "off" ? "geminigen" : null)],
+  // Stage 1: v1 → v2 (video-only pipeline). Idempotent.
+  const flag1 = getStmt.get("_migration_v2_video_only") as { value: string } | undefined;
+  if (flag1?.value !== "1") {
+    const stage1: Array<[string, (current: string) => string | null]> = [
+      ["TTS_PROVIDER", (v) => (v === "69labs" ? "geminigen" : null)],
+      ["IMAGE_PROVIDER", (v) => (v === "69labs" ? "geminigen" : null)],
+      ["ANIMATION_PROVIDER", (v) => (v === "69labs" || v === "off" ? "geminigen" : null)],
+      ["ANIMATION_RATIO_PERCENT", (v) => (v === "50" ? "100" : null)],
+      ["ANIMATION_DISTRIBUTION", (v) => (v === "first-half" ? "all" : null)],
+      ["IMAGE_MODEL", (v) => (v === "imagen-4" || v === "" ? "nano-banana-pro" : null)],
+      ["ANIMATION_MODEL", (v) => (v === "veo-3.1-fast" ? "veo-3.1" : null)],
+      ["IMAGE_RESOLUTION", (v) => (v === "1K" ? "2K" : null)],
+      ["ANIMATION_RESOLUTION", (v) => (v === "720p" ? "1080p" : null)],
+    ];
+    runMigration(stage1);
+    upsertStmt.run("_migration_v2_video_only", "1");
+  }
 
-    // legacy 50%-photo defaults → 100% video / "all"
-    ["ANIMATION_RATIO_PERCENT", (v) => (v === "50" ? "100" : null)],
-    ["ANIMATION_DISTRIBUTION", (v) => (v === "first-half" ? "all" : null)],
+  // Stage 2: TTS_PROVIDER=geminigen → algrow (GeminiGen TTS isn't on public API).
+  const flag2 = getStmt.get("_migration_v2_algrow_tts") as { value: string } | undefined;
+  if (flag2?.value !== "1") {
+    const stage2: Array<[string, (current: string) => string | null]> = [
+      // Anyone migrated by stage 1 (or fresh v1 forker) is on TTS_PROVIDER=geminigen.
+      // Force them to algrow so the pipeline doesn't try a 404 endpoint.
+      ["TTS_PROVIDER", (v) => (v === "geminigen" ? "algrow" : null)],
+      // Old GeminiGen voice id "Kore"/etc won't resolve in algrow — clear it so
+      // the user is forced to pick from algrow's catalog via Browse voices.
+      ["TTS_VOICE_ID", (v) =>
+        v && /^(Kore|Puck|Charon|Aoede|Fenrir|Leda|Orus|Zephyr|en-US-)/.test(v) ? "" : null,
+      ],
+      ["TTS_VOICE_NAME", (v) =>
+        v && /^(Kore|Puck|Charon|Aoede|Fenrir|Leda|Orus|Zephyr)$/.test(v) ? "" : null,
+      ],
+      ["TTS_MODEL", (v) => (v === "tts-flash" ? "eleven_multilingual_v2" : null)],
+    ];
+    runMigration(stage2);
+    upsertStmt.run("_migration_v2_algrow_tts", "1");
+  }
+}
 
-    // models that no longer exist as 69labs aliases
-    ["IMAGE_MODEL", (v) => (v === "imagen-4" || v === "" ? "nano-banana-pro" : null)],
-    ["ANIMATION_MODEL", (v) => (v === "veo-3.1-fast" ? "veo-3.1" : null)],
-    ["IMAGE_RESOLUTION", (v) => (v === "1K" ? "2K" : null)],
-    ["ANIMATION_RESOLUTION", (v) => (v === "720p" ? "1080p" : null)],
-  ];
-
-  for (const [key, transform] of forceTo) {
+function runMigration(transforms: Array<[string, (current: string) => string | null]>) {
+  for (const [key, transform] of transforms) {
     const row = getStmt.get(key) as { value: string } | undefined;
     if (!row) continue;
     const next = transform(row.value);
@@ -226,6 +252,4 @@ function migrateLegacyValues() {
       upsertStmt.run(key, next);
     }
   }
-
-  upsertStmt.run("_migration_v2_video_only", "1");
 }
