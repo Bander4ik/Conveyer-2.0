@@ -203,10 +203,26 @@ function renderKenBurnsClip(
   });
 }
 
-/** img2vid clip: loop short video to audio duration.
- *  Audio comes ONLY from the TTS mp3 (input 1) — Veo's own audio (input 0) is dropped.
+/** img2vid clip: render the Veo clip with its length matched to the TTS audio.
+ *
+ *  Veo always produces a fixed-length clip (4/6/8 s — capped at 8 s). When the
+ *  TTS narration for a scene runs LONGER than the Veo clip we used to loop the
+ *  Veo input with `-stream_loop -1` and rely on `-t` to cut. That made the clip
+ *  visibly restart from frame 1 around the 7-8 s mark — the "scene replays"
+ *  glitch users noticed on long sentences.
+ *
+ *  New strategy (no more abrupt loop):
+ *    1. If audio ≤ video: just cut with `-t` (no transform).
+ *    2. If audio overruns up to 1.5×: time-stretch the Veo clip with `setpts`
+ *       (subtle slow-motion that documentary viewers won't notice).
+ *    3. If audio overruns more: stretch to 1.5× then freeze the LAST frame
+ *       via `tpad=stop_mode=clone` for the remaining time. Better than a
+ *       jarring restart, and feels like the camera "settling".
+ *
+ *  Audio comes ONLY from the TTS mp3 (input 1) — Veo's own audio (input 0) is
+ *  dropped via explicit -map.
  */
-function renderAnimatedClip(
+async function renderAnimatedClip(
   videoPath: string,
   audioPath: string,
   outPath: string,
@@ -216,12 +232,31 @@ function renderAnimatedClip(
   durationSec: number,
   tailSilenceSec: number = 0
 ): Promise<void> {
+  const videoDur = await probeDuration(videoPath);
+
+  let videoFilter = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+  if (durationSec > videoDur + 0.05) {
+    const MAX_STRETCH = 1.5;
+    const stretchFactor = Math.min(durationSec / videoDur, MAX_STRETCH);
+    if (stretchFactor > 1.01) {
+      // setpts multiplies PTS → slower playback. Prepended so the resulting
+      // (stretched) frames are then scaled/cropped to final resolution.
+      videoFilter = `setpts=${stretchFactor.toFixed(3)}*PTS,${videoFilter}`;
+    }
+    const stretchedDur = videoDur * stretchFactor;
+    const freezeNeeded = Math.max(0, durationSec - stretchedDur);
+    if (freezeNeeded > 0.05) {
+      // Clone the last frame for the remaining time. Combined with `-t` below
+      // this gives us exactly the audio duration with no abrupt cut.
+      videoFilter = `${videoFilter},tpad=stop_mode=clone:stop_duration=${freezeNeeded.toFixed(3)}`;
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const cmd = ffmpeg()
       .input(videoPath)
-      .inputOptions(["-stream_loop -1"])
       .input(audioPath)
-      .videoFilters(`scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`);
+      .videoFilters(videoFilter);
     if (tailSilenceSec > 0) {
       cmd.audioFilters(`apad=pad_dur=${tailSilenceSec.toFixed(3)}`);
     }
