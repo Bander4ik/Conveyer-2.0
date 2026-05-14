@@ -163,18 +163,25 @@ export const DEFAULTS: Record<SettingKey, string> = {
   TTS_PAUSE_DURATION: "0.4",
   TTS_PAUSE_FREQUENCY: "1",
 
-  // Images — GeminiGen.AI by default, nano-banana-2 has no rate limit
+  // Images — GeminiGen.AI Gemini 3 Pro Image (nano-banana-pro) for maximum
+  // quality. nano-banana-pro is "professional asset creation, advanced
+  // reasoning, high-fidelity text" per the docs. Free tier has a 5/min rate
+  // limit so we lower IMAGE_CONCURRENCY accordingly.
   IMAGE_PROVIDER: "geminigen",
-  IMAGE_MODEL: "nano-banana-2",
+  IMAGE_MODEL: "nano-banana-pro",
   IMAGE_RATIO: "16:9",
-  IMAGE_RESOLUTION: "1K",
+  IMAGE_RESOLUTION: "2K",
   IMAGE_OUTPUT_FORMAT: "png",
   IMAGE_STYLE: "Photorealistic",
 
-  // Animations — GeminiGen.AI Veo 3.1 Fast by default
+  // Animations — GeminiGen.AI Veo 3.1 (full) at 1080p for maximum cinematic
+  // quality. veo-3.1 is the "Latest high-quality video generation model with
+  // enhanced capabilities" per the docs. Each clip burns more credits than
+  // veo-3.1-fast and takes longer — switch to veo-3.1-fast if budget/time is
+  // tight.
   ANIMATION_PROVIDER: "off",
-  ANIMATION_MODEL: "veo-3.1-fast",
-  ANIMATION_RESOLUTION: "720p",
+  ANIMATION_MODEL: "veo-3.1",
+  ANIMATION_RESOLUTION: "1080p",
   ANIMATION_RATIO_PERCENT: "50",
   ANIMATION_DISTRIBUTION: "first-half",
   ANIMATION_DURATION: "8",
@@ -188,9 +195,14 @@ export const DEFAULTS: Record<SettingKey, string> = {
   SCENE_TAIL_SILENCE: "0.4",
 
   // Performance
-  IMAGE_CONCURRENCY: "5",
+  //  - IMAGE_CONCURRENCY: 3 keeps us under nano-banana-pro's 5/min free-tier
+  //    cap. Switch to nano-banana-2 (no limit) and raise to 15+ for high
+  //    throughput.
+  //  - ANIMATION_CONCURRENCY: 2 because veo-3.1 (full) is the slowest model
+  //    and each clip costs more credits. Bump to 4–6 with veo-3.1-fast.
+  IMAGE_CONCURRENCY: "3",
   TTS_CONCURRENCY: "3",
-  ANIMATION_CONCURRENCY: "3",
+  ANIMATION_CONCURRENCY: "2",
   ASSEMBLE_CONCURRENCY: "4",
   ASSEMBLE_XFADE_CHUNKS: "4",
 };

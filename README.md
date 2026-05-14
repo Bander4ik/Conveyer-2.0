@@ -78,6 +78,22 @@ You also need to pick a TTS voice once:
 That's it. Optional: paste `LABS69_API_KEY` only if you'd rather use an ElevenLabs
 voice instead of Gemini TTS, then switch `TTS_PROVIDER` to `69labs`.
 
+### Quality vs throughput
+
+Defaults are tuned for **maximum quality**, suitable for premium YouTube content:
+
+| Stage | Model (default) | Why | Trade-off |
+|---|---|---|---|
+| Image | `nano-banana-pro` (Gemini 3 Pro Image) | Professional asset creation, advanced reasoning, high-fidelity text | Rate-limited 5/min on free tier — keep `IMAGE_CONCURRENCY=3` |
+| Image res | `2K` | Visibly sharper than 1K, perfect base for 1080p video | Costs more credits |
+| Video | `veo-3.1` (full) | Latest top-quality Veo with enhanced capabilities | Slowest, most credits per clip |
+| Video res | `1080p` | Matches YouTube HD output | More credits vs 720p |
+| TTS | `tts-flash` (Gemini 2.5 Flash) | Fast + expressive, 200ms latency, 400+ voices | Switch to `tts-pro` (Gemini 2.5 Pro TTS) for audiophile fidelity if you're on a paid GeminiGen plan |
+
+**To trade quality for speed/cost** (e.g. for bulk 20+ scene runs): switch to
+`nano-banana-2` (no rate limit), `veo-3.1-fast`, `720p` and raise concurrency
+in `/settings → Performance`.
+
 ---
 
 ## Pipeline architecture

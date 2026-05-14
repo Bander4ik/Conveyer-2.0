@@ -105,8 +105,8 @@ const GROUPS: Group[] = [
       },
       {
         key: "TTS_MODEL",
-        desc: "TTS model id. `tts-flash` (default) = Gemini 2.5 Flash TTS (fast, expressive). For ElevenLabs use `eleven_multilingual_v2`. For OpenAI use `gpt-4o-mini-tts`.",
-        examples: "tts-flash (geminigen default), eleven_multilingual_v2, gpt-4o-mini-tts",
+        desc: "TTS model id. `tts-flash` (default) = Gemini 2.5 Flash TTS — fast and expressive, ~200ms latency, perfect for narration. `tts-pro` = Gemini 2.5 Pro TTS — audiophile quality, better at interpreting nuanced style prompts/emotions (450ms latency, may need paid GeminiGen plan). For ElevenLabs use `eleven_multilingual_v2`. For OpenAI use `gpt-4o-mini-tts`.",
+        examples: "tts-flash (default, fast+great), tts-pro (audiophile, premium plan), eleven_multilingual_v2",
       },
       {
         key: "TTS_OUTPUT_FORMAT",
@@ -198,8 +198,8 @@ const GROUPS: Group[] = [
       },
       {
         key: "IMAGE_MODEL",
-        desc: "Specific model. `nano-banana-2` (default) = Gemini 3 Flash Image, NO rate limit, great quality. `nano-banana-pro` = Gemini 3 Pro Image, top quality but rate-limited (5/min free tier). `imagen-4` = balanced fast model with great textures.",
-        examples: "nano-banana-2, nano-banana-pro, imagen-4",
+        desc: "Specific model. `nano-banana-pro` (default) = Gemini 3 Pro Image — TOP QUALITY for professional content, advanced reasoning, high-fidelity text rendering. Rate-limited to 5/min on free tier. `nano-banana-2` = Gemini 3 Flash Image — slightly lower quality, NO rate limit (use this if you need 10+ concurrent images). `imagen-4` = great for textures (fur, fabric, water droplets).",
+        examples: "nano-banana-pro (max quality, rate-limited), nano-banana-2 (fast, unlimited), imagen-4 (textures)",
       },
       {
         key: "IMAGE_RATIO",
@@ -208,8 +208,8 @@ const GROUPS: Group[] = [
       },
       {
         key: "IMAGE_RESOLUTION",
-        desc: "Output resolution where supported. 1K is fastest and cheapest. 2K is visibly sharper but costs more credits. 4K is overkill for 1080p video output.",
-        examples: "1K (default)  /  2K  /  4K",
+        desc: "Output resolution. 2K (default) is visibly sharper than 1K and worth the extra credits for premium content. 1K is fastest and cheapest. 4K is overkill for 1080p video output — only useful if your final video is 4K.",
+        examples: "1K (fast)  /  2K (default, balanced)  /  4K (premium)",
       },
       {
         key: "IMAGE_OUTPUT_FORMAT",
@@ -234,13 +234,13 @@ const GROUPS: Group[] = [
       },
       {
         key: "ANIMATION_MODEL",
-        desc: "Specific Veo model. `veo-3.1-fast` (default) — fastest, great quality. `veo-3.1` — slowest, premium quality. `veo-3.1-lite` — generates video with synchronized audio. `veo-2` — supports flexible duration and 9:16.",
-        examples: "veo-3.1-fast, veo-3.1, veo-3.1-lite, veo-2",
+        desc: "Specific Veo model. `veo-3.1` (default) — TOP QUALITY, latest high-quality Veo with enhanced capabilities, slowest but most cinematic. `veo-3.1-fast` — fast variant with good quality, ideal when running 8+ scenes. `veo-3.1-lite` — generates video with synchronized audio. `veo-2` — legacy, 720p only, flexible duration.",
+        examples: "veo-3.1 (max quality), veo-3.1-fast (balanced), veo-3.1-lite (with audio), veo-2 (legacy)",
       },
       {
         key: "ANIMATION_RESOLUTION",
-        desc: "Output resolution for Veo clips. 720p is faster and cheaper, 1080p is sharper. Final video is downscaled to VIDEO_RESOLUTION anyway, so 720p is usually plenty.",
-        examples: "720p (default)  /  1080p",
+        desc: "Output resolution for Veo clips. 1080p (default) is full HD and matches the standard YouTube output. 720p is faster and cheaper but visibly softer.",
+        examples: "720p (fast)  /  1080p (default, full HD)",
       },
       {
         key: "ANIMATION_RATIO_PERCENT",
@@ -301,8 +301,8 @@ const GROUPS: Group[] = [
     fields: [
       {
         key: "IMAGE_CONCURRENCY",
-        desc: "Simultaneous image generation jobs. GeminiGen.AI's nano-banana-2 has NO rate limit, so this can be raised aggressively (15–20+) on a fast machine. Limited mostly by the speed of your local network and Node event loop.",
-        examples: "default 5  ·  raise to 10–20+ for faster runs (no API-side cap)",
+        desc: "Simultaneous image generation jobs. With `nano-banana-pro` (default, max quality) free tier limits you to ~5/min so keep this at 3. With `nano-banana-2` there's NO rate limit — raise to 15–20+ for high-throughput batch runs.",
+        examples: "3 (default, nano-banana-pro safe)  ·  15+ if you switch to nano-banana-2",
       },
       {
         key: "TTS_CONCURRENCY",
@@ -311,7 +311,7 @@ const GROUPS: Group[] = [
       },
       {
         key: "ANIMATION_CONCURRENCY",
-        desc: "Simultaneous Veo img2vid jobs through GeminiGen.AI. No documented hard limit on Veo through GeminiGen, so this can be raised. Each Veo clip burns credits, so watch your budget.",
+        desc: "Simultaneous Veo img2vid jobs through GeminiGen.AI. Default 2 because veo-3.1 (full, max quality) is slow and each clip burns credits. Bump to 4–6 if you switch to veo-3.1-fast.",
         examples: "default 3  ·  raise to 5–10 if credits allow",
       },
       {
