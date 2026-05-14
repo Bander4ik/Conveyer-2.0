@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "Conveyer Isabell",
+  title: "Conveyer 2.0",
   description: "Local pipeline platform for faceless AI YouTube videos.",
 };
 
@@ -14,14 +14,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <div style={{ minHeight: "100vh", display: "flex" }}>
           <nav className="card" style={{ width: 220, margin: 16, padding: 20, height: "fit-content" }}>
             <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>
-              Conveyer&nbsp;Isabell
+              Conveyer&nbsp;2.0
             </div>
             <Link href="/" style={navLink}>New run</Link>
             <Link href="/runs" style={navLink}>Run history</Link>
             <Link href="/prompts" style={navLink}>Prompts</Link>
             <Link href="/settings" style={navLink}>Keys &amp; Settings</Link>
             <div style={{ marginTop: 24, fontSize: 12, color: "#8a8aa0" }}>
-              v0.1 · local
+              v2.0 · local
             </div>
           </nav>
           <main style={{ flex: 1, padding: "16px 24px 64px 8px", maxWidth: 1100 }}>

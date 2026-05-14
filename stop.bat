@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Conveyer Isabell — Stop
+title Conveyer 2.0 — Stop
 
 echo Looking for processes on port 3000...
 echo.

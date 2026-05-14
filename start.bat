@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Conveyer Isabell
+title Conveyer 2.0
 
 where node >nul 2>nul
 if errorlevel 1 (
@@ -23,7 +23,7 @@ if not exist "node_modules" (
 
 echo.
 echo ============================================
-echo   Conveyer Isabell — starting dev server
+echo   Conveyer 2.0 — starting dev server
 echo   Browser will open at http://localhost:3000
 echo   To stop: close this window or press Ctrl+C
 echo ============================================

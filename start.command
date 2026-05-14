@@ -1,5 +1,5 @@
 #!/bin/bash
-# Conveyer Isabell — daily launcher (macOS / Linux)
+# Conveyer 2.0 — daily launcher (macOS / Linux)
 # Double-click this file in Finder to start the dev server and open the browser.
 
 cd "$(dirname "$0")"
@@ -23,7 +23,7 @@ fi
 
 echo ""
 echo "============================================"
-echo "  Conveyer Isabell — starting dev server"
+echo "  Conveyer 2.0 — starting dev server"
 echo "  Browser will open at http://localhost:3000"
 echo "  To stop: close this window or press Ctrl+C"
 echo "============================================"

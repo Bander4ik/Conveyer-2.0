@@ -1,6 +1,6 @@
 # Setup Guide — for non-technical users
 
-This guide walks you through installing and running Conveyer Isabell from absolute zero. If
+This guide walks you through installing and running Conveyer 2.0 from absolute zero. If
 you've never used Terminal or written a line of code in your life, this is the right document.
 
 > **Are you on Windows?** The same steps work — see the "On Windows" notes inside each section.
@@ -10,7 +10,7 @@ There are five parts, in order:
 
 1. [Install Node.js](#1-install-nodejs) — the engine the platform runs on
 2. [Install FFmpeg](#2-install-ffmpeg) — used to stitch videos together
-3. [Download Conveyer Isabell](#3-download-conveyer-isabell) — the project itself
+3. [Download Conveyer 2.0](#3-download-conveyer-20) — the project itself
 4. [Get the two required API keys](#4-get-the-two-required-api-keys) — Google + 69labs
 5. [Run your first video](#5-run-your-first-video)
 
@@ -85,7 +85,7 @@ Press Enter. It downloads for a couple of minutes and finishes on its own.
 
 ---
 
-## 3. Download Conveyer Isabell
+## 3. Download Conveyer 2.0
 
 ### Option A — Simplest: download a ZIP
 
@@ -94,7 +94,7 @@ Press Enter. It downloads for a couple of minutes and finishes on its own.
 3. Click **"Download ZIP"** at the bottom of the dropdown.
 4. The ZIP appears in your Downloads folder. **Double-click it** — macOS auto-extracts to a
    folder named `Conveyer-main`.
-5. **Move that folder** somewhere you'll remember, like `~/Documents/Conveyer-Isabell/`.
+5. **Move that folder** somewhere you'll remember, like `~/Documents/Conveyer-2.0/`.
    (Just drag it from Downloads into Documents in Finder.)
 
 ### Option B — Easier to update later: use git
@@ -116,7 +116,7 @@ When you download from GitHub, macOS doesn't automatically mark scripts as runna
 Open Terminal and run:
 
 ```bash
-cd ~/Documents/Conveyer-Isabell      # or wherever you put the folder
+cd ~/Documents/Conveyer-2.0      # or wherever you put the folder
 chmod +x install.command start.command stop.command
 ```
 
@@ -185,7 +185,7 @@ Now we tie everything together.
 2. **Double-click `start.command`**.
 3. Terminal opens. After a few seconds it says **"Ready in 1.6s"** and your default browser
    opens to `http://localhost:3000`.
-4. You see the Conveyer Isabell home page with a "New run" form.
+4. You see the Conveyer 2.0 home page with a "New run" form.
 
 The Terminal window must stay open while you use the platform. Closing it stops the server.
 

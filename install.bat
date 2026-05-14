@@ -1,11 +1,11 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Conveyer Isabell — Installation
+title Conveyer 2.0 — Installation
 
 echo.
 echo ============================================
-echo   Conveyer Isabell — installation
+echo   Conveyer 2.0 — installation
 echo ============================================
 echo.
 

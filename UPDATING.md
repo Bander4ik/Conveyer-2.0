@@ -1,4 +1,4 @@
-# Updating Conveyer Isabell
+# Updating Conveyer 2.0
 
 When a new version is published on GitHub, you can pull the changes without losing
 your API keys, custom prompts, or generated runs. Your data lives in a separate

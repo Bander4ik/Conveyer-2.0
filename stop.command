@@ -1,5 +1,5 @@
 #!/bin/bash
-# Conveyer Isabell — stop server (macOS / Linux)
+# Conveyer 2.0 — stop server (macOS / Linux)
 # Use if Ctrl+C doesn't kill the dev server or you see "port 3000 in use".
 
 echo "Looking for processes on port 3000..."

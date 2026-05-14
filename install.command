@@ -1,12 +1,12 @@
 #!/bin/bash
-# Conveyer Isabell — one-time installer (macOS / Linux)
+# Conveyer 2.0 — one-time installer (macOS / Linux)
 # Double-click this file in Finder to install npm dependencies.
 
 cd "$(dirname "$0")"
 
 echo ""
 echo "============================================"
-echo "  Conveyer Isabell — installation"
+echo "  Conveyer 2.0 — installation"
 echo "============================================"
 echo ""
 
