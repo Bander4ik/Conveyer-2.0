@@ -22,34 +22,36 @@ import { log, type LogLevel } from "../logger";
  */
 
 const BASE = "https://api.algrow.online";
-const POLL_INTERVAL_MS = 2500;
-// TTS is fast but long scripts can queue; 5 min is plenty.
+// Algrow polls share a 60/min limit. With N parallel scenes polling every
+// POLL_INTERVAL_MS, each scene issues ~60_000/POLL_INTERVAL_MS polls per minute.
+// 5 s × 10 scenes = 120/min — still over. The rate limiter below catches what
+// the interval doesn't, but a slower base interval reduces wasted blocking time.
+const POLL_INTERVAL_MS = 5000;
 const POLL_MAX_MS = 5 * 60 * 1000;
 
-// Algrow's documented rate cap is 30 requests/min (sliding window). pLimit
-// caps concurrency but not throughput, so 3 parallel jobs that each take
-// ~3 s still issue ~60/min — over the limit. We add an explicit sliding
-// window that paces submissions to ≤ MAX_PER_WINDOW per WINDOW_MS.
+// Two independent sliding windows: submits and status polls have different
+// rate caps on Algrow's side, so we track them separately.
+//   POST /api/generate-simple → 30 / min  (we use 28 for headroom)
+//   GET  /api/job-status/{id} → 60 / min  (we use 55 for headroom)
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX_PER_WINDOW = 28; // leave a small headroom below the 30 cap
-const recentRequests: number[] = [];
+const submitTimestamps: number[] = [];
+const statusTimestamps: number[] = [];
 
-async function rateLimitWait(): Promise<void> {
+async function rateLimitWait(window: number[], maxPerWindow: number): Promise<void> {
   while (true) {
     const now = Date.now();
-    // Drop timestamps older than the window
-    while (recentRequests.length && now - recentRequests[0] > RATE_WINDOW_MS) {
-      recentRequests.shift();
-    }
-    if (recentRequests.length < RATE_MAX_PER_WINDOW) {
-      recentRequests.push(now);
+    while (window.length && now - window[0] > RATE_WINDOW_MS) window.shift();
+    if (window.length < maxPerWindow) {
+      window.push(now);
       return;
     }
-    // Sleep just past the oldest request's window expiry
-    const sleepMs = RATE_WINDOW_MS - (now - recentRequests[0]) + 50;
+    const sleepMs = RATE_WINDOW_MS - (now - window[0]) + 50;
     await sleep(sleepMs);
   }
 }
+
+const SUBMIT_MAX = 28;
+const STATUS_MAX = 55;
 
 function apiKey(): string {
   const k = getSetting("ALGROW_API_KEY");
@@ -191,7 +193,7 @@ export async function createTtsJob(opts: TtsJobOpts): Promise<TtsSubmitResult> {
 
   const MAX_ATTEMPTS = 6;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    await rateLimitWait();
+    await rateLimitWait(submitTimestamps, SUBMIT_MAX);
     const r = await fetch(`${BASE}/api/generate-simple`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey()}` },
@@ -236,13 +238,26 @@ interface JobStatus {
 }
 
 async function fetchJobStatus(jobId: string): Promise<JobStatus> {
-  const r = await fetch(`${BASE}/api/job-status/${jobId}`, {
-    headers: { Authorization: `Bearer ${apiKey()}` },
-  });
-  if (!r.ok) {
-    throw new Error(`Algrow status ${jobId} ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  // Status checks share their own sliding window. On 429, honor the server's
+  // "Try again in Ns" hint up to 6 times — much better than killing the
+  // whole scene because a poll attempt happened to land at minute boundary.
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    await rateLimitWait(statusTimestamps, STATUS_MAX);
+    const r = await fetch(`${BASE}/api/job-status/${jobId}`, {
+      headers: { Authorization: `Bearer ${apiKey()}` },
+    });
+    if (r.ok) return (await r.json()) as JobStatus;
+    const body = (await r.text()).slice(0, 200);
+    if (r.status === 429 && attempt < MAX_ATTEMPTS) {
+      const hinted = parse429Retry(body);
+      const waitMs = hinted ?? Math.min(2000 * 2 ** (attempt - 1), 30_000);
+      await sleep(waitMs);
+      continue;
+    }
+    throw new Error(`Algrow status ${jobId} ${r.status}: ${body}`);
   }
-  return (await r.json()) as JobStatus;
+  throw new Error(`Algrow status ${jobId}: exhausted retries (rate-limited)`);
 }
 
 /** Polls until status === completed, returns the final audio URL. */

@@ -150,11 +150,13 @@ export const DEFAULTS: Record<SettingKey, string> = {
   IMAGE_OUTPUT_FORMAT: "png",
   IMAGE_STYLE: "Photorealistic",
 
-  // Animations — every scene gets a Veo video clip by default in v2. The
-  // image still gets generated as the keyframe for img2vid. veo-3.1 (full,
-  // max quality) at 1080p. Switch to veo-3.1-fast if you need throughput.
+  // Animations — every scene gets a Veo clip in v2. Valid GeminiGen Veo
+  // model ids (per the live API's INVALID_INPUT response): veo-2, veo-3,
+  // veo-3-fast. The docs page mentions veo-3.1 / veo-3.1-fast but those
+  // strings are rejected at the server — likely stale docs. veo-3 is the
+  // full quality variant, veo-3-fast is the speed-optimized variant.
   ANIMATION_PROVIDER: "geminigen",
-  ANIMATION_MODEL: "veo-3.1",
+  ANIMATION_MODEL: "veo-3",
   ANIMATION_RESOLUTION: "1080p",
   ANIMATION_RATIO_PERCENT: "100",       // EVERY scene becomes a Veo clip
   ANIMATION_DISTRIBUTION: "all",
@@ -263,6 +265,22 @@ function migrateLegacyValues() {
     ];
     runMigration(stage3);
     upsertStmt.run("_migration_v2_no_images", "1");
+  }
+
+  // Stage 5: fix Veo model ids — veo-3.1 and veo-3.1-fast are not valid in
+  // GeminiGen's API despite being documented. Server rejects them with
+  // INVALID_INPUT and lists 'veo-2', 'veo-3', 'veo-3-fast' as accepted.
+  const flag5 = getStmt.get("_migration_v2_real_veo_ids") as { value: string } | undefined;
+  if (flag5?.value !== "1") {
+    const stage5: Array<[string, (current: string) => string | null]> = [
+      ["ANIMATION_MODEL", (v) => {
+        if (v === "veo-3.1") return "veo-3";
+        if (v === "veo-3.1-fast") return "veo-3-fast";
+        return null;
+      }],
+    ];
+    runMigration(stage5);
+    upsertStmt.run("_migration_v2_real_veo_ids", "1");
   }
 
   // Stage 4: force-reset the scene_split prompt to the v2 long-scene template.
