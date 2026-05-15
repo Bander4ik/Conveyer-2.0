@@ -93,6 +93,9 @@ export async function runPipeline(runId: string, script: string) {
           const [audio, image] = await Promise.all([audioPromise, imagePromise]);
 
           // Animate this scene. Text-to-video if no image, img2vid if there is one.
+          // We also pass the audio duration so the animator can generate ENOUGH
+          // Veo clips to cover the narration (Veo caps each clip at ~8 s, but
+          // algrow scenes are 20-50 s of TTS — one clip leaves a freeze frame).
           let videoPath: string | null = null;
           if (animTargets.has(scene.index)) {
             try {
@@ -105,6 +108,7 @@ export async function runPipeline(runId: string, script: string) {
                   {
                     providerJobId: image?.providerJobId,
                     imageProvider: image?.provider,
+                    audioDurationSec: audio.durationSec,
                   }
                 )
               );

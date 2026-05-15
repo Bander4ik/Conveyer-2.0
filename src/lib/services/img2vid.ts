@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import ffmpeg from "fluent-ffmpeg";
 import { getSetting } from "../settings";
 import { getPrompt } from "../prompts";
 import { log } from "../logger";
@@ -25,7 +26,7 @@ export async function animateScene(
   scene: Scene,
   imagePath: string | null,
   outDir: string,
-  _options: { providerJobId?: string; imageProvider?: string } = {}
+  options: { providerJobId?: string; imageProvider?: string; audioDurationSec?: number } = {}
 ): Promise<string | null> {
   const provider = (getSetting("ANIMATION_PROVIDER") || "geminigen").toLowerCase();
   if (provider === "off") return null;
@@ -40,7 +41,7 @@ export async function animateScene(
   });
 
   if (provider === "geminigen") {
-    await geminigenImg2Vid(runId, scene, imagePath, filePath);
+    await geminigenImg2Vid(runId, scene, imagePath, filePath, options.audioDurationSec);
   } else if (provider === "replicate") {
     if (!imagePath) throw new Error("Replicate Kling requires an image keyframe — set IMAGE_PROVIDER != off");
     await replicateImg2Vid(scene, imagePath, filePath);
@@ -68,7 +69,8 @@ async function geminigenImg2Vid(
   runId: string,
   scene: Scene,
   imagePath: string | null,
-  outPath: string
+  outPath: string,
+  audioDurationSec: number | undefined
 ) {
   // Sanitize the model id against GeminiGen's actual whitelist. The settings
   // UI lets users type anything and the docs page lists stale names
@@ -92,51 +94,186 @@ async function geminigenImg2Vid(
   const resolution = getSetting("ANIMATION_RESOLUTION") || "720p";
   const durationRaw = Number(getSetting("ANIMATION_DURATION") || "8");
   // Veo accepts 4/6/8 seconds. Snap to nearest supported value.
-  const duration = durationRaw >= 7 ? 8 : durationRaw >= 5 ? 6 : 4;
+  const clipDurationSec = durationRaw >= 7 ? 8 : durationRaw >= 5 ? 6 : 4;
+
+  // Multi-clip strategy: algrow's min TTS length (200 chars ≈ 20 s) is much
+  // longer than Veo's per-clip cap (8 s). If we generate ONE clip per scene
+  // we'd freeze the last frame for 12-30 s of audio — looks dead.
+  // Instead we generate ceil(audio/clip) clips and concat them. Each clip
+  // covers ~8 s of audio with real motion, no freezes.
+  const audioSec = audioDurationSec && audioDurationSec > 0 ? audioDurationSec : clipDurationSec;
+  const numClips = Math.max(1, Math.ceil(audioSec / clipDurationSec));
+
+  log(
+    runId,
+    "info",
+    `Scene #${scene.index} → ${numClips} Veo clip(s) × ${clipDurationSec}s for ${audioSec.toFixed(1)}s of audio`,
+    { stage: "animate" }
+  );
 
   const motionStyle = getPrompt("animation_motion");
-  const prompt = `${scene.visual_prompt}. ${motionStyle}`;
 
+  // Prompt variations help Veo produce distinguishable shots when we ask for
+  // N clips of the same scene. Without variation the clips can look near
+  // identical. We add a "shot N of M" hint plus a varying camera direction.
+  const cameraHints = [
+    "establishing wide shot",
+    "slow push-in, gentle parallax",
+    "lateral drift across the frame",
+    "slow pull-back revealing more of the scene",
+    "ascending arc reveal",
+    "descending arc reveal",
+  ];
+  function variantPrompt(i: number): string {
+    if (numClips === 1) return `${scene.visual_prompt}. ${motionStyle}`;
+    const hint = cameraHints[i % cameraHints.length];
+    return `${scene.visual_prompt}. ${motionStyle}. Camera: ${hint}.`;
+  }
+
+  // Generate each clip with up to 3 retries. The Veo server occasionally
+  // returns "high traffic" — we already retry inside this helper.
+  const clipPaths = await Promise.all(
+    Array.from({ length: numClips }, (_, i) =>
+      generateOneVeoClip({
+        runId,
+        index: i,
+        total: numClips,
+        scene,
+        outDir: path.dirname(outPath),
+        outFile: path.basename(outPath, ".mp4") + `_part${i}.mp4`,
+        prompt: variantPrompt(i),
+        model,
+        resolution,
+        duration: clipDurationSec,
+        aspectRatio,
+        imagePath: i === 0 ? imagePath : null, // keyframe only matters for first clip
+      })
+    )
+  );
+
+  // If only one clip — just rename / move to the final outPath.
+  if (clipPaths.length === 1) {
+    fs.renameSync(clipPaths[0], outPath);
+    return;
+  }
+
+  // Concat all clips into a single mp4 covering the full audio duration.
+  await concatClips(runId, clipPaths, outPath, audioSec);
+
+  // Cleanup intermediate part files.
+  for (const p of clipPaths) {
+    try { fs.unlinkSync(p); } catch {}
+  }
+}
+
+interface OneClipOpts {
+  runId: string;
+  index: number;
+  total: number;
+  scene: Scene;
+  outDir: string;
+  outFile: string;
+  prompt: string;
+  model: string;
+  resolution: string;
+  duration: number;
+  aspectRatio: string;
+  imagePath: string | null;
+}
+
+async function generateOneVeoClip(opts: OneClipOpts): Promise<string> {
+  const fullOutPath = path.join(opts.outDir, opts.outFile);
   const MAX_ATTEMPTS = 3;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const job = await ggCreateVideo({
-        prompt,
-        model,
-        resolution,
-        duration,
-        aspectRatio,
-        // Only attach the image when we actually have one.
-        ...(imagePath
-          ? { modeImage: "frame" as const, refImagePaths: [imagePath] }
+        prompt: opts.prompt,
+        model: opts.model,
+        resolution: opts.resolution,
+        duration: opts.duration,
+        aspectRatio: opts.aspectRatio,
+        ...(opts.imagePath
+          ? { modeImage: "frame" as const, refImagePaths: [opts.imagePath] }
           : {}),
       });
       log(
-        runId,
+        opts.runId,
         "debug",
-        `geminigen video job ${job.uuid.slice(0, 8)}… (model=${model}, res=${resolution}, dur=${duration}s, attempt=${attempt})`,
+        `geminigen video job ${job.uuid.slice(0, 8)}… (scene #${opts.scene.index} clip ${opts.index + 1}/${opts.total}, model=${opts.model}, res=${opts.resolution}, dur=${opts.duration}s, attempt=${attempt})`,
         { stage: "animate" }
       );
-      const item = await ggPollJob("video", job.uuid, runId, "animate");
+      const item = await ggPollJob("video", job.uuid, opts.runId, "animate");
       const url = ggExtractResultUrl("video", item);
-      await ggDownload(url, outPath);
-      return;
+      await ggDownload(url, fullOutPath);
+      return fullOutPath;
     } catch (e) {
       lastErr = e;
       const msg = e instanceof Error ? e.message : String(e);
       if (attempt < MAX_ATTEMPTS) {
         const delay = 5000 * attempt;
-        // Bumped slice 200 → 600 so Pydantic validation errors aren't cut off
-        // mid-message — input_value/input_type fields live near the end.
-        log(runId, "warn", `geminigen video attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg.slice(0, 600)} — retry in ${delay}ms`, {
-          stage: "animate",
-        });
+        log(
+          opts.runId,
+          "warn",
+          `geminigen video attempt ${attempt}/${MAX_ATTEMPTS} failed (scene #${opts.scene.index} clip ${opts.index + 1}/${opts.total}): ${msg.slice(0, 600)} — retry in ${delay}ms`,
+          { stage: "animate" }
+        );
         await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+/** Concat several Veo mp4 clips into one. Uses FFmpeg's concat demuxer with
+ *  stream copy (fast, no re-encode) — all Veo clips share the same codec,
+ *  resolution and framerate so this is safe. Trims final output to
+ *  audioDurationSec so we don't overshoot the audio.
+ */
+function concatClips(
+  runId: string,
+  clipPaths: string[],
+  outPath: string,
+  audioDurationSec: number
+): Promise<void> {
+  const ffmpegPath = getSetting("FFMPEG_PATH");
+  if (ffmpegPath) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+  }
+  // concat demuxer needs a file list — write one alongside the clips
+  const listFile = path.join(path.dirname(outPath), `${path.basename(outPath, ".mp4")}_list.txt`);
+  fs.writeFileSync(
+    listFile,
+    clipPaths.map((p) => `file '${p.replace(/\\/g, "/")}'`).join("\n"),
+    "utf-8"
+  );
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(listFile)
+      .inputOptions(["-f concat", "-safe 0"])
+      .outputOptions([
+        // stream copy is safe — all Veo outputs share codec params
+        "-c copy",
+        // trim to exact audio length
+        `-t ${audioDurationSec.toFixed(3)}`,
+        "-movflags +faststart",
+      ])
+      .on("end", () => {
+        try { fs.unlinkSync(listFile); } catch {}
+        log(
+          runId,
+          "info",
+          `Concatenated ${clipPaths.length} Veo clips → ${path.basename(outPath)} (trimmed to ${audioDurationSec.toFixed(1)}s)`,
+          { stage: "animate" }
+        );
+        resolve();
+      })
+      .on("error", (err) => {
+        try { fs.unlinkSync(listFile); } catch {}
+        reject(err);
+      })
+      .save(outPath);
+  });
 }
 
 async function replicateImg2Vid(scene: Scene, imagePath: string, outPath: string) {

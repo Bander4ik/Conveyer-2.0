@@ -319,6 +319,38 @@ function migrateLegacyValues() {
     } catch {}
     upsertStmt.run("_migration_v2_tighter_scenes", "1");
   }
+
+  // Stage 7: clean up exotic ANIMATION_MODEL values + force ANIMATION_DURATION=8.
+  // Reasoning: a user (Vlad) wound up with ANIMATION_MODEL="veo-video" — not a
+  // valid id. Migration v2_real_veo_ids_v2 only catches veo-3.1* variants, so
+  // anything else weird slipped through. The runtime fallback in img2vid.ts
+  // already remaps these on the fly, but we should also clean DB so the
+  // /settings UI shows the right value and the warning stops.
+  // Also: ANIMATION_DURATION was somehow set to 6 in his DB; with multi-Veo-
+  // per-scene the audio length drives total animation duration, so longer
+  // per-clip = fewer clips = fewer API calls + credits. 8 s is the cap.
+  const flag7 = getStmt.get("_migration_v2_animation_cleanup") as { value: string } | undefined;
+  if (flag7?.value !== "1") {
+    const stage7: Array<[string, (current: string) => string | null]> = [
+      ["ANIMATION_MODEL", (v) => {
+        const validIds = new Set(["veo-2", "veo-3", "veo-3-fast"]);
+        if (validIds.has(v)) return null;
+        // Try common typos / stale ids
+        if (/3\.1-fast/i.test(v) || /3-fast/i.test(v)) return "veo-3-fast";
+        if (/^veo-3/i.test(v)) return "veo-3";
+        if (/^veo-2/i.test(v)) return "veo-2";
+        // Anything else (e.g. "veo-video", "") → safe default
+        return "veo-3";
+      }],
+      ["ANIMATION_DURATION", (v) => {
+        const n = parseInt(v, 10);
+        if (Number.isFinite(n) && n >= 7) return null; // already 7-8
+        return "8";
+      }],
+    ];
+    runMigration(stage7);
+    upsertStmt.run("_migration_v2_animation_cleanup", "1");
+  }
 }
 
 function runMigration(transforms: Array<[string, (current: string) => string | null]>) {
