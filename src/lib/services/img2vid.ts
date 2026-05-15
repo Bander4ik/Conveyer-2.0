@@ -70,7 +70,24 @@ async function geminigenImg2Vid(
   imagePath: string | null,
   outPath: string
 ) {
-  const model = getSetting("ANIMATION_MODEL") || "veo-3.1-fast";
+  // Sanitize the model id against GeminiGen's actual whitelist. The settings
+  // UI lets users type anything and the docs page lists stale names
+  // (veo-3.1*). Catch those at runtime so the server doesn't reject them.
+  const VALID_VEO_MODELS = new Set(["veo-2", "veo-3", "veo-3-fast"]);
+  const raw = getSetting("ANIMATION_MODEL") || "veo-3";
+  let model = raw;
+  if (!VALID_VEO_MODELS.has(model)) {
+    if (/3\.1-fast/i.test(model) || /3-fast/i.test(model)) model = "veo-3-fast";
+    else if (/^veo-3/i.test(model)) model = "veo-3";
+    else if (/^veo-2/i.test(model)) model = "veo-2";
+    else model = "veo-3";
+    log(
+      runId,
+      "warn",
+      `ANIMATION_MODEL='${raw}' is not a valid Veo id — using '${model}'. Edit /settings to silence this.`,
+      { stage: "animate" }
+    );
+  }
   const aspectRatio = getSetting("IMAGE_RATIO") || "16:9";
   const resolution = getSetting("ANIMATION_RESOLUTION") || "720p";
   const durationRaw = Number(getSetting("ANIMATION_DURATION") || "8");
@@ -110,7 +127,9 @@ async function geminigenImg2Vid(
       const msg = e instanceof Error ? e.message : String(e);
       if (attempt < MAX_ATTEMPTS) {
         const delay = 5000 * attempt;
-        log(runId, "warn", `geminigen video attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg.slice(0, 200)} — retry in ${delay}ms`, {
+        // Bumped slice 200 → 600 so Pydantic validation errors aren't cut off
+        // mid-message — input_value/input_type fields live near the end.
+        log(runId, "warn", `geminigen video attempt ${attempt}/${MAX_ATTEMPTS} failed: ${msg.slice(0, 600)} — retry in ${delay}ms`, {
           stage: "animate",
         });
         await new Promise((r) => setTimeout(r, delay));

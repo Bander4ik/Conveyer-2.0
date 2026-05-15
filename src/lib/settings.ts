@@ -270,17 +270,25 @@ function migrateLegacyValues() {
   // Stage 5: fix Veo model ids — veo-3.1 and veo-3.1-fast are not valid in
   // GeminiGen's API despite being documented. Server rejects them with
   // INVALID_INPUT and lists 'veo-2', 'veo-3', 'veo-3-fast' as accepted.
-  const flag5 = getStmt.get("_migration_v2_real_veo_ids") as { value: string } | undefined;
+  //
+  // We run this with bumped flag _v2 because the first version of this
+  // migration was too narrow (only exact-match), so users with anything else
+  // veo-3.1-flavored (lite, etc.) didn't get fixed.
+  const flag5 = getStmt.get("_migration_v2_real_veo_ids_v2") as { value: string } | undefined;
   if (flag5?.value !== "1") {
     const stage5: Array<[string, (current: string) => string | null]> = [
       ["ANIMATION_MODEL", (v) => {
-        if (v === "veo-3.1") return "veo-3";
-        if (v === "veo-3.1-fast") return "veo-3-fast";
+        // Catch any veo-3.1* variant the docs claimed existed.
+        if (/^veo-3\.1-fast$/i.test(v)) return "veo-3-fast";
+        if (/^veo-3\.1-lite$/i.test(v)) return "veo-3";
+        if (/^veo-3\.1$/i.test(v)) return "veo-3";
+        // Anything else with "3.1" in it → safe default
+        if (/3\.1/.test(v)) return "veo-3";
         return null;
       }],
     ];
     runMigration(stage5);
-    upsertStmt.run("_migration_v2_real_veo_ids", "1");
+    upsertStmt.run("_migration_v2_real_veo_ids_v2", "1");
   }
 
   // Stage 4: force-reset the scene_split prompt to the v2 long-scene template.
@@ -298,6 +306,18 @@ function migrateLegacyValues() {
       db.prepare("DELETE FROM prompts WHERE name = ?").run("scene_split");
     } catch {}
     upsertStmt.run("_migration_v2_long_scenes", "1");
+  }
+
+  // Stage 6: bump the prompt again — first v2 long-scenes template produced
+  // 35-50s audio per scene which is too long for an 8s Veo clip (the visual
+  // stays frozen for the back half of each scene). New template tightens to
+  // 220-380 chars / 12-18s audio per scene so Veo's clip covers most of it.
+  const flag6 = getStmt.get("_migration_v2_tighter_scenes") as { value: string } | undefined;
+  if (flag6?.value !== "1") {
+    try {
+      db.prepare("DELETE FROM prompts WHERE name = ?").run("scene_split");
+    } catch {}
+    upsertStmt.run("_migration_v2_tighter_scenes", "1");
   }
 }
 
